@@ -309,6 +309,9 @@ class KazakhKhanateGame {
             console.log('🎲 Purchasing lucky box...');
             const boxPrice = this.web3.utils.toWei('0.1', 'ether');
             
+            // Show lucky box animation
+            this.showLuckyBoxAnimation();
+            
             // Get current Batyr ownership for comparison
             const currentBatyrs = await this.getCurrentBatyrs();
             
@@ -323,23 +326,24 @@ class KazakhKhanateGame {
                 const { batyrId, name } = batyrEvent.returnValues;
                 const batyrStats = await this.contract.methods.getBatyrStats(batyrId).call();
                 
-                // Show elaborate notification
-                this.showNotification(`
-                    🎉 Congratulations! You acquired ${name}!
-                    ${batyrStats.ability}: ${batyrStats.description}
-                `, 6000);
+                // Show Batyr reveal animation
+                this.showBatyrReveal(batyrId, batyrStats);
                 
-                // Play celebration animation
-                this.showCelebration();
+                // Update UI after animation
+                setTimeout(async () => {
+                    await this.updateBalance();
+                    await this.updateBatyrList();
+                }, 4000);
             } else {
-                this.showNotification('📦 No Batyr this time. Try again!');
+                // Show empty box after animation
+                setTimeout(() => {
+                    this.showEmptyBoxResult();
+                }, 2000);
             }
-            
-            await this.updateBalance();
-            await this.updateBatyrList();
         } catch (error) {
             console.error('🐞 Lucky box purchase error:', error);
             this.showNotification('❌ Failed to purchase lucky box');
+            this.removeLuckyBoxAnimation();
         }
     }
 
@@ -442,15 +446,27 @@ class KazakhKhanateGame {
         const batyrList = document.querySelector('.batyr-list');
         batyrList.innerHTML = '';
 
-        const batyrIds = [1, 2, 3, 4, 5];
-        for (const id of batyrIds) {
+        // Get current Batyr ownership
+        const ownedBatyrs = new Set();
+        for (let i = 1; i <= 5; i++) {
             try {
-                const hasBatyr = await this.contract.methods.hasBatyr(this.account, id).call();
+                const hasBatyr = await this.contract.methods.hasBatyr(this.account, i).call();
                 if (hasBatyr) {
-                    const batyrStats = await this.contract.methods.getBatyrStats(id).call();
-                    const batyrCard = document.createElement('div');
-                    batyrCard.className = 'batyr-card';
-                    
+                    ownedBatyrs.add(i);
+                }
+            } catch (error) {
+                console.error(`Error checking Batyr ${i}:`, error);
+            }
+        }
+
+        // Display all Batyrs (owned and unowned)
+        for (let id = 1; id <= 5; id++) {
+            try {
+                const batyrStats = await this.contract.methods.getBatyrStats(id).call();
+                const batyrCard = document.createElement('div');
+                batyrCard.className = `batyr-card ${ownedBatyrs.has(id) ? '' : 'locked'}`;
+                
+                if (ownedBatyrs.has(id)) {
                     // Calculate bonus percentages
                     const archerBonus = ((batyrStats.archerBonus - 100) / 100) * 100;
                     const cavalryBonus = ((batyrStats.cavalryBonus - 100) / 100) * 100;
@@ -469,11 +485,102 @@ class KazakhKhanateGame {
                             ${batyrStats.canBattle ? '<p class="battle-ready">🗡️ Battle Ready</p>' : '<p class="defensive">🛡️ Defensive Only</p>'}
                         </div>
                     `;
-                    batyrList.appendChild(batyrCard);
+                } else {
+                    batyrCard.innerHTML = `
+                        <img src="images/batyrs/batyr${id}.png" alt="Unknown Batyr">
+                        <div class="batyr-preview">
+                            <h4>${batyrStats.name}</h4>
+                            <p>${batyrStats.ability}</p>
+                        </div>
+                    `;
                 }
+                
+                batyrList.appendChild(batyrCard);
             } catch (error) {
-                console.error(`🐞 Error checking Batyr ${id}:`, error);
+                console.error(`Error loading Batyr ${id}:`, error);
             }
+        }
+    }
+
+    showLuckyBoxAnimation() {
+        const overlay = document.createElement('div');
+        overlay.className = 'lucky-box-overlay';
+        overlay.id = 'luckyBoxOverlay';
+        
+        overlay.innerHTML = `
+            <div class="lucky-box-animation" style="transition: opacity 0.5s ease">
+                <img src="images/lucky-box.gif" alt="Opening Lucky Box" class="lucky-box-gif">
+            </div>
+            <div class="lucky-box-result"></div>
+        `;
+        
+        document.body.appendChild(overlay);
+    }
+
+    showBatyrReveal(batyrId, batyrStats) {
+        const overlay = document.getElementById('luckyBoxOverlay');
+        const animation = overlay.querySelector('.lucky-box-animation');
+        const resultDiv = overlay.querySelector('.lucky-box-result');
+        
+        // First, fade out the GIF
+        animation.style.opacity = '0';
+        
+        // After GIF fades out, show the Batyr
+        setTimeout(() => {
+            animation.style.display = 'none';
+            resultDiv.innerHTML = `
+                <img src="images/batyrs/batyr${batyrId}.png" alt="${batyrStats.name}" class="batyr-reveal">
+                <h3>${batyrStats.name}</h3>
+                <p>${batyrStats.ability}</p>
+            `;
+            resultDiv.classList.add('show');
+            
+            // Play celebration effect
+            this.showCelebration();
+            
+            // Show notification
+            this.showNotification(`
+                🎉 Congratulations! You acquired ${batyrStats.name}!
+                ${batyrStats.ability}: ${batyrStats.description}
+            `, 6000);
+            
+            // Remove animation after delay
+            setTimeout(() => {
+                this.removeLuckyBoxAnimation();
+            }, 4000);
+        }, 500);
+    }
+
+    showEmptyBoxResult() {
+        const overlay = document.getElementById('luckyBoxOverlay');
+        const animation = overlay.querySelector('.lucky-box-animation');
+        const resultDiv = overlay.querySelector('.lucky-box-result');
+        
+        // First, fade out the GIF
+        animation.style.opacity = '0';
+        animation.style.transition = 'opacity 0.5s ease';
+        
+        // After GIF fades out, show the result
+        setTimeout(() => {
+            animation.style.display = 'none';
+            resultDiv.innerHTML = `
+                <h3>Better luck next time!</h3>
+                <p>No Batyr this time...</p>
+            `;
+            resultDiv.classList.add('show');
+            
+            // Remove everything after showing the result
+            setTimeout(() => {
+                this.removeLuckyBoxAnimation();
+                this.showNotification('📦 No Batyr this time. Try again!');
+            }, 2000);
+        }, 500);
+    }
+
+    removeLuckyBoxAnimation() {
+        const overlay = document.getElementById('luckyBoxOverlay');
+        if (overlay) {
+            overlay.remove();
         }
     }
 
