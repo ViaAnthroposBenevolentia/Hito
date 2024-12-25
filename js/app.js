@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0x41Bd1B5A71BA4561219026f6F675f59267AF61BB';
+        this.contractAddress = '0xbA5CB4AABB9D34Bc321946fd8D666B6Ff7A26c7a';
         this.accounts = [];
         this.accountLocations = {}; // Will store account locations on the map
         this.setupEventListeners();
@@ -306,17 +306,83 @@ class KazakhKhanateGame {
 
     async purchaseLuckyBox() {
         try {
+            console.log('🎲 Purchasing lucky box...');
             const boxPrice = this.web3.utils.toWei('0.1', 'ether');
-            await this.contract.methods.purchaseLuckyBox()
+            
+            // Get current Batyr ownership for comparison
+            const currentBatyrs = await this.getCurrentBatyrs();
+            
+            const result = await this.contract.methods.purchaseLuckyBox()
                 .send({ from: this.account, value: boxPrice });
             
-            this.showNotification('✅ Lucky box purchased!');
+            console.log('📦 Lucky box purchase result:', result);
+            
+            // Check for BatyrAcquired event
+            const batyrEvent = result.events.BatyrAcquired;
+            if (batyrEvent) {
+                const { batyrId, name } = batyrEvent.returnValues;
+                const batyrStats = await this.contract.methods.getBatyrStats(batyrId).call();
+                
+                // Show elaborate notification
+                this.showNotification(`
+                    🎉 Congratulations! You acquired ${name}!
+                    ${batyrStats.ability}: ${batyrStats.description}
+                `, 6000);
+                
+                // Play celebration animation
+                this.showCelebration();
+            } else {
+                this.showNotification('📦 No Batyr this time. Try again!');
+            }
+            
             await this.updateBalance();
             await this.updateBatyrList();
         } catch (error) {
             console.error('🐞 Lucky box purchase error:', error);
             this.showNotification('❌ Failed to purchase lucky box');
         }
+    }
+
+    async getCurrentBatyrs() {
+        const batyrs = [];
+        for (let i = 1; i <= 5; i++) {
+            const hasBatyr = await this.contract.methods.hasBatyr(this.account, i).call();
+            if (hasBatyr) {
+                batyrs.push(i);
+            }
+        }
+        return batyrs;
+    }
+
+    showCelebration() {
+        const celebration = document.createElement('div');
+        celebration.className = 'celebration';
+        document.body.appendChild(celebration);
+        
+        // Add confetti effect
+        for (let i = 0; i < 50; i++) {
+            const confetti = document.createElement('div');
+            confetti.className = 'confetti';
+            confetti.style.left = Math.random() * 100 + 'vw';
+            confetti.style.animationDelay = Math.random() * 2 + 's';
+            confetti.style.backgroundColor = `hsl(${Math.random() * 360}, 50%, 50%)`;
+            celebration.appendChild(confetti);
+        }
+
+        // Remove celebration after animation
+        setTimeout(() => {
+            celebration.remove();
+        }, 3000);
+    }
+
+    showNotification(message, duration = 3000) {
+        const notification = document.getElementById('notification');
+        const notificationText = document.getElementById('notification-text');
+        notificationText.innerHTML = message; // Allow HTML in notifications
+        notification.classList.remove('hidden');
+        setTimeout(() => {
+            notification.classList.add('hidden');
+        }, duration);
     }
 
     async battle(opponent) {
@@ -381,11 +447,27 @@ class KazakhKhanateGame {
             try {
                 const hasBatyr = await this.contract.methods.hasBatyr(this.account, id).call();
                 if (hasBatyr) {
+                    const batyrStats = await this.contract.methods.getBatyrStats(id).call();
                     const batyrCard = document.createElement('div');
                     batyrCard.className = 'batyr-card';
+                    
+                    // Calculate bonus percentages
+                    const archerBonus = ((batyrStats.archerBonus - 100) / 100) * 100;
+                    const cavalryBonus = ((batyrStats.cavalryBonus - 100) / 100) * 100;
+                    
                     batyrCard.innerHTML = `
-                        <img src="images/batyrs/batyr${id}.png" alt="Batyr ${id}">
-                        <h3>${await this.getBatyrName(id)}</h3>
+                        <img src="images/batyrs/batyr${id}.png" alt="${batyrStats.name}">
+                        <h3>${batyrStats.name}</h3>
+                        <div class="batyr-ability">
+                            <h4>${batyrStats.ability}</h4>
+                            <p>${batyrStats.description}</p>
+                        </div>
+                        <div class="batyr-stats">
+                            <p>Power: ${batyrStats.power}</p>
+                            ${archerBonus > 0 ? `<p>Archer Bonus: +${archerBonus}%</p>` : ''}
+                            ${cavalryBonus > 0 ? `<p>Cavalry Bonus: +${cavalryBonus}%</p>` : ''}
+                            ${batyrStats.canBattle ? '<p class="battle-ready">🗡️ Battle Ready</p>' : '<p class="defensive">🛡️ Defensive Only</p>'}
+                        </div>
                     `;
                     batyrList.appendChild(batyrCard);
                 }
@@ -393,27 +475,6 @@ class KazakhKhanateGame {
                 console.error(`🐞 Error checking Batyr ${id}:`, error);
             }
         }
-    }
-
-    async getBatyrName(id) {
-        const names = [
-            'Kabanbay Batyr',
-            'Kobylandy Batyr',
-            'Abylai Khan',
-            'Raimgazy Batyr',
-            'Srym Datov'
-        ];
-        return names[id - 1];
-    }
-
-    showNotification(message) {
-        const notification = document.getElementById('notification');
-        const notificationText = document.getElementById('notification-text');
-        notificationText.textContent = message;
-        notification.classList.remove('hidden');
-        setTimeout(() => {
-            notification.classList.add('hidden');
-        }, 3000);
     }
 
     setupEventListeners() {

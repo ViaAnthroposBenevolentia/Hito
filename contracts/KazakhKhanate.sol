@@ -18,6 +18,11 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
         string name;
         uint256 power;
         string ability;
+        string description;
+        bool canBattle;
+        bool defenseBonus;
+        uint256 archerBonus;  // Multiplier in basis points (100 = 1x, 150 = 1.5x)
+        uint256 cavalryBonus; // Multiplier in basis points
     }
 
     mapping(address => Khanate) public khanates;
@@ -28,16 +33,65 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
 
     event KhanateCreated(address indexed owner, string name);
     event TroopsPurchased(address indexed owner, uint256 archers, uint256 cavalry);
-    event BatyrAcquired(address indexed owner, uint256 batyrId);
-    event BattleResult(address indexed attacker, address indexed defender, bool victory);
+    event BatyrAcquired(address indexed owner, uint256 batyrId, string name);
+    event BattleResult(address indexed attacker, address indexed defender, bool victory, uint256 powerUsed);
 
     constructor() {
-        // Initialize Batyr stats
-        batyrStats[1] = BatyrStats("Kabanbay Batyr", 30, "Very high damage");
-        batyrStats[2] = BatyrStats("Kobylandy Batyr", 25, "High speed and defense");
-        batyrStats[3] = BatyrStats("Abylai Khan", 20, "Leadership bonus");
-        batyrStats[4] = BatyrStats("Raimgazy Batyr", 22, "Cavalry counter");
-        batyrStats[5] = BatyrStats("Srym Datov", 21, "Archer specialist");
+        // Initialize Batyr stats with unique abilities
+        batyrStats[1] = BatyrStats(
+            "Kabanbay Batyr",
+            30,
+            "Cavalry Commander",
+            "A legendary warrior known for his cavalry tactics. Increases cavalry effectiveness by 50%",
+            true,   // Can battle
+            false,  // No defense bonus
+            100,    // Normal archer bonus
+            150     // 1.5x cavalry bonus
+        );
+        
+        batyrStats[2] = BatyrStats(
+            "Kobylandy Batyr",
+            25,
+            "Master Defender",
+            "A stalwart defender of the Kazakh lands. Provides strong defensive bonuses but cannot participate in attacks",
+            false,  // Cannot battle
+            true,   // Has defense bonus
+            100,    // Normal archer bonus
+            100     // Normal cavalry bonus
+        );
+        
+        batyrStats[3] = BatyrStats(
+            "Abylai Khan",
+            20,
+            "Strategic Leader",
+            "A brilliant strategist who enhances all troops' effectiveness by 20%",
+            true,   // Can battle
+            true,   // Has defense bonus
+            120,    // 1.2x archer bonus
+            120     // 1.2x cavalry bonus
+        );
+        
+        batyrStats[4] = BatyrStats(
+            "Raimgazy Batyr",
+            22,
+            "Archer Commander",
+            "Master of archery tactics. Increases archer effectiveness by 50%",
+            true,   // Can battle
+            false,  // No defense bonus
+            150,    // 1.5x archer bonus
+            100     // Normal cavalry bonus
+        );
+        
+        batyrStats[5] = BatyrStats(
+            "Srym Datov",
+            21,
+            "Tactical Genius",
+            "A master of combined arms tactics. Provides balanced bonuses to all units",
+            true,   // Can battle
+            true,   // Has defense bonus
+            130,    // 1.3x archer bonus
+            130     // 1.3x cavalry bonus
+        );
     }
 
     function createKhanate(string memory _name) external {
@@ -74,12 +128,24 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
 
         // Using block difficulty and timestamp for randomness (Note: not secure for production)
         uint256 randomNumber = uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, msg.sender)));
-        uint256 chance = randomNumber % 100;
+        uint256 chance = randomNumber % 1000; // Using 1000 for more granular probability
 
-        if (chance < 10) { // 10% chance
+        // Check if player has any Batyrs
+        bool hasExistingBatyr = false;
+        for (uint256 i = 1; i <= 5; i++) {
+            if (khanates[msg.sender].batyrs[i]) {
+                hasExistingBatyr = true;
+                break;
+            }
+        }
+
+        // 10% chance if no Batyr, 0.1% chance if has Batyr
+        uint256 threshold = hasExistingBatyr ? 1 : 100;
+        
+        if (chance < threshold) {
             uint256 batyrId = (randomNumber % 5) + 1;
             khanates[msg.sender].batyrs[batyrId] = true;
-            emit BatyrAcquired(msg.sender, batyrId);
+            emit BatyrAcquired(msg.sender, batyrId, batyrStats[batyrId].name);
         }
 
         if (msg.value > LUCKY_BOX_PRICE) {
@@ -91,8 +157,8 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
         require(khanates[msg.sender].isInitialized && khanates[_opponent].isInitialized, "Invalid khanates");
         require(_opponent != msg.sender, "Cannot battle yourself");
 
-        uint256 attackerPower = calculateBattlePower(msg.sender);
-        uint256 defenderPower = calculateBattlePower(_opponent);
+        uint256 attackerPower = calculateBattlePower(msg.sender, false);
+        uint256 defenderPower = calculateBattlePower(_opponent, true);
 
         bool victory = attackerPower > defenderPower;
         
@@ -107,20 +173,40 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
             khanates[msg.sender].cavalry = (khanates[msg.sender].cavalry * 6) / 10;
         }
 
-        emit BattleResult(msg.sender, _opponent, victory);
+        emit BattleResult(msg.sender, _opponent, victory, attackerPower);
     }
 
-    function calculateBattlePower(address _player) internal view returns (uint256) {
-        uint256 power = (khanates[_player].archers * 1) + (khanates[_player].cavalry * 2);
+    function calculateBattlePower(address _player, bool isDefending) internal view returns (uint256) {
+        uint256 archerBonus = 100;  // Base 1x multiplier
+        uint256 cavalryBonus = 100; // Base 1x multiplier
+        uint256 defenseBonus = 0;
         
-        // Add Batyr bonuses
+        // Calculate bonuses from Batyrs
         for (uint256 i = 1; i <= 5; i++) {
             if (khanates[_player].batyrs[i]) {
-                power += batyrStats[i].power;
+                BatyrStats memory batyr = batyrStats[i];
+                
+                // Only apply battle power if the Batyr can battle and we're attacking
+                if (!isDefending && batyr.canBattle) {
+                    defenseBonus += batyr.power;
+                }
+                
+                // Apply defense bonus if the Batyr has one and we're defending
+                if (isDefending && batyr.defenseBonus) {
+                    defenseBonus += batyr.power;
+                }
+                
+                // Apply unit bonuses (take the highest bonus for each unit type)
+                if (batyr.archerBonus > archerBonus) archerBonus = batyr.archerBonus;
+                if (batyr.cavalryBonus > cavalryBonus) cavalryBonus = batyr.cavalryBonus;
             }
         }
         
-        return power;
+        // Calculate total power with bonuses
+        uint256 archerPower = (khanates[_player].archers * archerBonus) / 100;
+        uint256 cavalryPower = (khanates[_player].cavalry * 2 * cavalryBonus) / 100;
+        
+        return archerPower + cavalryPower + defenseBonus;
     }
 
     function getKhanateStats(address _player) external view returns (
@@ -137,5 +223,28 @@ contract KazakhKhanate is Ownable, ReentrancyGuard {
     function hasBatyr(address _player, uint256 _batyrId) external view returns (bool) {
         require(_batyrId > 0 && _batyrId <= 5, "Invalid Batyr ID");
         return khanates[_player].batyrs[_batyrId];
+    }
+
+    function getBatyrStats(uint256 _batyrId) external view returns (
+        string memory name,
+        uint256 power,
+        string memory ability,
+        string memory description,
+        bool canBattle,
+        bool defenseBonus,
+        uint256 archerBonus,
+        uint256 cavalryBonus
+    ) {
+        BatyrStats memory batyr = batyrStats[_batyrId];
+        return (
+            batyr.name,
+            batyr.power,
+            batyr.ability,
+            batyr.description,
+            batyr.canBattle,
+            batyr.defenseBonus,
+            batyr.archerBonus,
+            batyr.cavalryBonus
+        );
     }
 } 
