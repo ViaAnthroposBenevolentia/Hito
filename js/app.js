@@ -3,11 +3,106 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0x5C394042CEBcc94820bA8909c950e4EEeC5C84b1';
+        this.contractAddress = '0xFfbEFd8B97eAf2c8D7CfF97F1BeC77575Ff6283D';
         this.accounts = [];
-        this.accountLocations = {}; // Will store account locations on the map
+        this.accountLocations = {};
+        this.activeMovements = new Map();
+        this.achievements = new Map();
+        this.globalMovements = new Map();
+        this.lastBattleCheck = 0;
+        this.strategicQuotes = [
+            {
+                text: "The supreme art of war is to subdue the enemy without fighting.",
+                author: "Sun Tzu"
+            },
+            {
+                text: "In battle, numbers alone confer no advantage. Do not advance relying on sheer military power.",
+                author: "Sun Tzu"
+            },
+            {
+                text: "The strong warrior is not aggressive, the effective fighter is not angry.",
+                author: "Lao Tzu"
+            },
+            {
+                text: "Unity is strength... when there is teamwork and collaboration, wonderful things can be achieved.",
+                author: "Mattie Stepanek"
+            },
+            {
+                text: "The art of war is simple enough. Find out where your enemy is. Get at him as soon as you can.",
+                author: "Ulysses S. Grant"
+            }
+        ];
+        this.kazakhQuotes = [
+            {
+                text: "A warrior's honor is his most precious possession.",
+                author: "Kazakh Proverb"
+            },
+            {
+                text: "The steppe knows no boundaries, but the warrior knows his homeland.",
+                author: "Kazakh Proverb"
+            },
+            {
+                text: "Victory comes not to the swift, but to the wise.",
+                author: "Kazakh Proverb"
+            }
+        ];
         this.setupEventListeners();
         this.initialize();
+    }
+
+    getRandomQuote(context = 'general') {
+        const quotes = context === 'kazakh' ? this.kazakhQuotes : this.strategicQuotes;
+        const randomIndex = Math.floor(Math.random() * quotes.length);
+        return quotes[randomIndex];
+    }
+
+    async loadAchievements() {
+        if (!this.contract || !this.account) return;
+        
+        try {
+            const stats = await this.contract.methods.getPlayerStats(this.account).call();
+            this.achievements = new Map(Object.entries(stats));
+            this.updateAchievementDisplay();
+        } catch (error) {
+            // Only log error if it's not due to uninitialized Khanate
+            if (!error.message.includes('Khanate not initialized')) {
+                console.error('Error loading achievements:', error);
+            }
+        }
+    }
+
+    updateAchievementDisplay() {
+        const badges = {
+            FIRST_BLOOD: { name: "First Blood", description: "Win your first battle" },
+            VETERAN: { name: "Veteran", description: "Win 10 battles" },
+            WARLORD: { name: "Warlord", description: "Win 50 battles" },
+            DEFENDER: { name: "Stalwart Defender", description: "Successfully defend 5 times" },
+            COLLECTOR: { name: "Batyr Collector", description: "Collect all Batyrs" }
+        };
+
+        // Create achievements section if it doesn't exist
+        let achievementsSection = document.getElementById('achievements-section');
+        if (!achievementsSection) {
+            achievementsSection = document.createElement('section');
+            achievementsSection.id = 'achievements-section';
+            achievementsSection.innerHTML = '<h2>Achievements</h2><div id="achievements" class="achievements-grid"></div>';
+            document.getElementById('khanate-info').insertAdjacentElement('afterend', achievementsSection);
+        }
+
+        const achievementsContainer = document.getElementById('achievements');
+        achievementsContainer.innerHTML = '';
+
+        Object.entries(badges).forEach(([key, badge]) => {
+            const isUnlocked = this.achievements.get(key);
+            const badgeElement = document.createElement('div');
+            badgeElement.className = `achievement-badge ${isUnlocked ? 'unlocked' : 'locked'}`;
+            badgeElement.innerHTML = `
+                <div class="badge-icon">${isUnlocked ? '🏆' : '🔒'}</div>
+                <h4>${badge.name}</h4>
+                <p>${badge.description}</p>
+            `;
+            achievementsContainer.appendChild(badgeElement);
+        });
     }
 
     async initialize() {
@@ -47,6 +142,8 @@ class KazakhKhanateGame {
         document.getElementById('account-address').textContent = `${this.account.substring(0, 6)}...${this.account.substring(38)}`;
         await this.updateBalance();
         await this.checkKhanateStatus();
+        await this.loadAchievements();
+        await this.refreshActiveBattles();
         this.showNotification('✅ Connected to account successfully!');
     }
 
@@ -154,6 +251,31 @@ class KazakhKhanateGame {
 
     logout() {
         this.account = null;
+        // Clean up UI elements
+        document.getElementById('khanate-creation').classList.add('hidden');
+        document.getElementById('khanate-info').classList.add('hidden');
+        document.getElementById('batyrs').classList.add('hidden');
+        document.getElementById('actions').classList.add('hidden');
+        document.getElementById('battle-modal').classList.add('hidden');
+        document.getElementById('purchase-modal').classList.add('hidden');
+        
+        // Remove achievements section if it exists
+        const achievementsSection = document.getElementById('achievements-section');
+        if (achievementsSection) {
+            achievementsSection.remove();
+        }
+        
+        // Remove experience bar if it exists
+        const expDisplay = document.querySelector('.experience-bar');
+        if (expDisplay) {
+            expDisplay.remove();
+        }
+        
+        // Clear any active movements or battles
+        this.activeMovements.clear();
+        this.globalMovements.clear();
+        document.getElementById('troop-movements').innerHTML = '';
+        
         this.showAccountSelection();
         this.showNotification('✅ Logged out successfully');
     }
@@ -199,15 +321,19 @@ class KazakhKhanateGame {
     }
 
     async checkKhanateStatus() {
+        if (!this.contract || !this.account) {
+            this.showKhanateCreation();
+            return;
+        }
+
         try {
             const khanateInfo = await this.contract.methods.getKhanateStats(this.account).call();
-            if (khanateInfo.name) {
-                this.showGameInterface(khanateInfo);
-            } else {
-                this.showKhanateCreation();
-            }
+            this.showGameInterface(khanateInfo);
         } catch (error) {
-            console.error('🐞 Khanate status check error:', error);
+            // Only show Khanate creation if the error is not about initialization
+            if (!error.message.includes('Khanate not initialized')) {
+                console.error('Khanate status check error:', error);
+            }
             this.showKhanateCreation();
         }
     }
@@ -224,7 +350,36 @@ class KazakhKhanateGame {
         document.getElementById('archer-count').textContent = khanateInfo.archers;
         document.getElementById('cavalry-count').textContent = khanateInfo.cavalry;
 
+        // Remove old experience bar if it exists
+        const oldExpDisplay = document.querySelector('.experience-bar');
+        if (oldExpDisplay) {
+            oldExpDisplay.remove();
+        }
+
+        // Add experience display
+        const expToNextLevel = khanateInfo.level * 100;
+        const currentExp = khanateInfo.experience;
+        const expProgress = (currentExp / expToNextLevel) * 100;
+        
+        const expDisplay = document.createElement('div');
+        expDisplay.className = 'experience-bar';
+        expDisplay.innerHTML = `
+            <div class="exp-progress" style="width: ${expProgress}%"></div>
+            <span class="exp-text">EXP: ${currentExp}/${expToNextLevel}</span>
+        `;
+        
+        // Insert after level display
+        const levelElement = document.getElementById('player-level').parentElement;
+        levelElement.insertAdjacentElement('afterend', expDisplay);
+
+        // Remove old achievements section if it exists
+        const oldAchievementsSection = document.getElementById('achievements-section');
+        if (oldAchievementsSection) {
+            oldAchievementsSection.remove();
+        }
+
         this.updateBatyrList();
+        this.updateAchievementDisplay();
     }
 
     showKhanateCreation() {
@@ -391,55 +546,343 @@ class KazakhKhanateGame {
 
     async battle(opponent) {
         try {
+            // Check if player is already in battle
+            const activeBattles = await this.checkActiveBattles();
+            if (activeBattles.length > 0) {
+                throw new Error('You already have an active battle. Wait for it to finish.');
+            }
+
             console.log('⚔️ Initiating battle with opponent:', opponent);
             
-            // Get opponent's info
-            const opponentInfo = await this.contract.methods.getKhanateStats(opponent).call();
-            console.log('🎯 Opponent Khanate:', {
-                name: opponentInfo.name,
-                level: opponentInfo.level,
-                archers: opponentInfo.archers,
-                cavalry: opponentInfo.cavalry
-            });
+            // Verify opponent's Khanate exists and has troops
+            try {
+                const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
+                console.log('Opponent stats:', opponentStats);
+            } catch (error) {
+                throw new Error('Invalid opponent or opponent has no Khanate');
+            }
 
-            // Get our info
-            const ourInfo = await this.contract.methods.getKhanateStats(this.account).call();
-            console.log('🛡️ Our Khanate:', {
-                name: ourInfo.name,
-                level: ourInfo.level,
-                archers: ourInfo.archers,
-                cavalry: ourInfo.cavalry
-            });
+            // Verify own troops
+            const myStats = await this.contract.methods.getKhanateStats(this.account).call();
+            if (myStats.archers === '0' && myStats.cavalry === '0') {
+                throw new Error('You have no troops to battle with');
+            }
 
-            console.log('⚔️ Sending battle transaction...');
-            const result = await this.contract.methods.battle(opponent)
-                .send({ from: this.account });
+            // Calculate distance and travel time
+            const sourcePos = this.accountLocations[this.account];
+            const targetPos = this.accountLocations[opponent];
             
-            console.log('✨ Battle transaction result:', result);
-
-            // Get updated stats after battle
-            const updatedStats = await this.contract.methods.getKhanateStats(this.account).call();
-            const losses = {
-                archers: ourInfo.archers - updatedStats.archers,
-                cavalry: ourInfo.cavalry - updatedStats.cavalry
+            // Initiate battle on blockchain first to get the travel time
+            console.log('Initiating battle transaction...');
+            const result = await this.contract.methods.initiateBattle(opponent)
+                .send({ 
+                    from: this.account,
+                    gas: 300000
+                });
+            
+            console.log('Battle initiated successfully:', result);
+            
+            // Get battle info to get the actual travel time
+            const battleId = result.events.BattleInitiated.returnValues.battleId;
+            const battle = await this.contract.methods.activeBattles(battleId).call();
+            const travelTime = parseInt(battle.travelTime) * 1000; // Convert to milliseconds
+            
+            // Create troop movement animation with blockchain travel time
+            const movementId = Date.now();
+            this.createTroopMovement(sourcePos, targetPos, travelTime, movementId);
+            
+            // Store battle data
+            const battleData = {
+                opponent,
+                startTime: Date.now(),
+                travelTime,
+                movementId,
+                battleId
             };
-
-            console.log('📊 Battle results:', {
-                levelBefore: ourInfo.level,
-                levelAfter: updatedStats.level,
-                losses: losses
-            });
-
-            // Determine battle outcome
-            const victory = updatedStats.level > ourInfo.level;
-            const outcome = victory ? '🎉 Victory!' : '💔 Defeat!';
-            this.showNotification(`${outcome} Lost ${losses.archers} archers and ${losses.cavalry} cavalry.`);
             
-            await this.checkKhanateStatus();
+            // Add to active movements
+            this.activeMovements.set(movementId, battleData);
+            
+            // Show travel notification
+            this.showNotification(`⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds`);
+            
+            // Schedule battle execution with a small delay after travel time
+            setTimeout(() => this.executeBattle(battleId), travelTime + 2000);
+            
+            // Hide battle modal
+            document.getElementById('battle-modal').classList.add('hidden');
+            
         } catch (error) {
             console.error('🐞 Battle error:', error);
             this.showNotification('❌ Battle failed: ' + error.message);
         }
+    }
+
+    calculateDistance(pos1, pos2) {
+        const dx = pos1.x - pos2.x;
+        const dy = pos1.y - pos2.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    calculateTravelTime(distance) {
+        // Base time: 1 second per 10 units of distance
+        return (distance * 100) + 2000; // Minimum 2 seconds
+    }
+
+    createTroopMovement(start, end, duration, movementId) {
+        // Store movement globally
+        const movement = {
+            start,
+            end,
+            startTime: Date.now(),
+            duration,
+            movementId
+        };
+        this.globalMovements.set(movementId, movement);
+        this.renderTroopMovement(movement);
+    }
+
+    renderTroopMovement(movement) {
+        const movementsContainer = document.getElementById('troop-movements');
+        const existingPath = document.getElementById(`path-${movement.movementId}`);
+        if (existingPath) {
+            existingPath.remove();
+        }
+
+        // Calculate elapsed time and remaining duration
+        const elapsed = Date.now() - movement.startTime;
+        const remaining = Math.max(0, movement.duration - elapsed);
+        
+        if (remaining <= 0) {
+            this.globalMovements.delete(movement.movementId);
+            return;
+        }
+
+        // Create path container
+        const pathContainer = document.createElement('div');
+        pathContainer.className = 'troop-path-container';
+        pathContainer.id = `path-${movement.movementId}`;
+        
+        // Add speed up button
+        const speedUpButton = document.createElement('button');
+        speedUpButton.className = 'speed-up-button';
+        speedUpButton.innerHTML = `
+            ⚡ Speed Up
+            <span class="cost">(0.3 ETH)</span>
+        `;
+        speedUpButton.onclick = () => this.speedUpTroops(movement.movementId);
+        pathContainer.appendChild(speedUpButton);
+        
+        // Calculate path position and rotation
+        const dx = movement.end.x - movement.start.x;
+        const dy = movement.end.y - movement.start.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        // Create dashed path line
+        const path = document.createElement('div');
+        path.className = 'troop-path';
+        path.style.width = `${distance}%`;
+        path.style.transform = `rotate(${angle}deg)`;
+        
+        // Create troops icon with current position
+        const troops = document.createElement('div');
+        troops.className = 'moving-troops';
+        troops.style.animation = `moveAlongPath ${remaining}ms linear`;
+        troops.style.left = `${(elapsed / movement.duration) * 100}%`;
+        
+        // Create timer
+        const timer = document.createElement('div');
+        timer.className = 'travel-timer';
+        timer.id = `timer-${movement.movementId}`;
+        
+        // Update timer
+        const updateTimer = () => {
+            const newElapsed = Date.now() - movement.startTime;
+            const newRemaining = Math.max(0, Math.ceil((movement.duration - newElapsed) / 1000));
+            timer.textContent = `${newRemaining}s`;
+            
+            if (newRemaining > 0) {
+                requestAnimationFrame(updateTimer);
+            }
+        };
+        requestAnimationFrame(updateTimer);
+        
+        // Add troops image with fallback
+        const troopsImg = document.createElement('img');
+        troopsImg.src = 'images/troops/troops.png';
+        troopsImg.alt = 'Moving Troops';
+        troopsImg.onerror = () => {
+            troops.innerHTML = '⚔️';
+            troops.style.fontSize = '20px';
+        };
+        troops.appendChild(troopsImg);
+        troops.appendChild(timer);
+        
+        // Position the container
+        pathContainer.style.left = `${movement.start.x}%`;
+        pathContainer.style.top = `${movement.start.y}%`;
+        
+        // Assemble everything
+        path.appendChild(troops);
+        pathContainer.appendChild(path);
+        movementsContainer.appendChild(pathContainer);
+        
+        // Clean up after animation
+        setTimeout(() => {
+            pathContainer.remove();
+            this.globalMovements.delete(movement.movementId);
+            this.showBattleAnimation(movement.end.x, movement.end.y);
+        }, remaining);
+    }
+
+    showBattleAnimation(x, y) {
+        const animation = document.createElement('div');
+        animation.className = 'battle-animation';
+        animation.style.left = `${x}%`;
+        animation.style.top = `${y}%`;
+        animation.innerHTML = `
+            <img src="images/battle-animation.gif" alt="Battle">
+        `;
+        document.getElementById('troop-movements').appendChild(animation);
+        
+        setTimeout(() => {
+            animation.remove();
+        }, 3000);
+    }
+
+    async executeBattle(battleId) {
+        try {
+            console.log('Executing battle with ID:', battleId);
+            
+            // Check if battle exists and is ready
+            const battle = await this.contract.methods.activeBattles(battleId).call();
+            console.log('Battle status:', battle);
+            
+            const currentTime = Math.floor(Date.now() / 1000);
+            const battleStartTime = parseInt(battle.startTime);
+            const travelTime = parseInt(battle.travelTime);
+            
+            if (currentTime < battleStartTime + travelTime) {
+                throw new Error(`Troops still traveling. Please wait ${battleStartTime + travelTime - currentTime} seconds.`);
+            }
+            
+            // Execute battle with proper gas limit
+            const result = await this.contract.methods.executeBattle(battleId)
+                .send({ 
+                    from: this.account,
+                    gas: 300000
+                });
+            
+            console.log('Battle execution result:', result);
+            
+            // Process battle results
+            await this.processBattleResults(battleId, result);
+            
+        } catch (error) {
+            console.error('Battle execution error:', error);
+            
+            // Extract the revert reason if available
+            let errorMessage = error.message;
+            if (error.message.includes('execution reverted')) {
+                try {
+                    const revertReason = error.message.match(/reason string "(.+?)"/)[1];
+                    errorMessage = revertReason;
+                } catch (e) {
+                    // If we can't extract the reason, use a more user-friendly message
+                    errorMessage = 'Battle execution failed. The battle may have already been resolved or troops are still traveling.';
+                }
+            }
+            
+            this.showNotification('❌ Battle failed: ' + errorMessage);
+        }
+    }
+
+    removeTroopMovement(movementId) {
+        const path = document.getElementById(`path-${movementId}`);
+        if (path) path.remove();
+    }
+
+    async speedUpTroops(movementId) {
+        const movement = this.globalMovements.get(movementId);
+        if (!movement) return;
+        
+        try {
+            // Get battle ID from active battles
+            const activeBattles = await this.checkActiveBattles();
+            const battle = activeBattles.find(b => 
+                Date.now() - (parseInt(b.startTime) * 1000) < parseInt(b.travelTime) * 1000
+            );
+            
+            if (!battle) {
+                throw new Error('No active battle found to speed up');
+            }
+            
+            // Call the speed up function
+            await this.contract.methods.speedUpBattle(battle.battleId)
+                .send({
+                    from: this.account,
+                    value: this.web3.utils.toWei('0.3', 'ether'),
+                    gas: 300000
+                });
+            
+            // Remove the movement animation
+            const pathContainer = document.getElementById(`path-${movementId}`);
+            if (pathContainer) {
+                pathContainer.remove();
+            }
+            
+            this.globalMovements.delete(movementId);
+            this.showNotification('⚡ Battle speed up successful!');
+            
+            // Execute battle immediately
+            await this.executeBattle(battle.battleId);
+            
+        } catch (error) {
+            console.error('Speed up error:', error);
+            this.showNotification('❌ Failed to speed up battle: ' + error.message);
+        }
+    }
+
+    async processBattleResults(battleId, result) {
+        if (!result.events.BattleResult) {
+            console.error('No battle result event found');
+            return;
+        }
+
+        const { winner, loser, experienceGained } = result.events.BattleResult.returnValues;
+        const isWinner = winner.toLowerCase() === this.account.toLowerCase();
+        
+        // Get updated stats after the battle
+        const myStats = await this.contract.methods.getKhanateStats(this.account).call();
+        
+        // Show battle results with celebration for victory
+        if (isWinner) {
+            this.showCelebration();
+            this.showNotification(`🎉 Victory! Gained ${experienceGained} experience!`, 6000);
+        } else {
+            this.showNotification(`💔 Defeat!`, 6000);
+        }
+        
+        // Update UI
+        await this.checkKhanateStatus();
+        await this.updateBalance();
+        await this.loadAchievements();
+        
+        // Show achievement badges if any were earned
+        const newAchievements = await this.contract.methods.getPlayerStats(this.account).call();
+        Object.entries(newAchievements).forEach(([achievement, earned]) => {
+            if (earned && !this.achievements.get(achievement)) {
+                this.showAchievementBadge(achievement);
+            }
+        });
+        this.achievements = new Map(Object.entries(newAchievements));
+    }
+
+    async calculatePowerRatio(stronger, weaker) {
+        const strongerPower = await this.calculateTotalPower(stronger);
+        const weakerPower = await this.calculateTotalPower(weaker);
+        return strongerPower / weakerPower;
     }
 
     async updateBatyrList() {
@@ -630,8 +1073,13 @@ class KazakhKhanateGame {
                 await this.showBattleMap();
             } catch (error) {
                 console.error('Error loading battle map:', error);
-                this.showNotification('❌ Failed to load opponents');
+                this.showNotification('��� Failed to load opponents');
             }
+        });
+
+        // Add event listener for battle modal close button
+        document.getElementById('cancel-battle').addEventListener('click', () => {
+            document.getElementById('battle-modal').classList.add('hidden');
         });
 
         // Update total cost when troop amounts change
@@ -659,20 +1107,141 @@ class KazakhKhanateGame {
         });
     }
 
-    showOpponentDetails(account, khanateInfo) {
+    async showOpponentDetails(account, khanateInfo) {
         const opponentList = document.getElementById('opponent-list');
+        
+        // Get own stats
+        const myStats = await this.contract.methods.getKhanateStats(this.account).call();
+        
+        // Calculate army powers
+        const myPower = await this.calculateTotalPower(this.account);
+        const opponentPower = await this.calculateTotalPower(account);
+        
+        // Calculate win chance (simplified version)
+        const totalPower = myPower + opponentPower;
+        const winChance = Math.min(90, Math.max(10, (myPower / totalPower) * 100));
+        
+        // Get Batyr bonuses
+        const myBonuses = await this.getBatyrBonuses(this.account);
+        const opponentBonuses = await this.getBatyrBonuses(account);
+        
         opponentList.innerHTML = `
-            <div class="opponent-details">
-                <div class="opponent-info">
-                    <h4>${khanateInfo.name}</h4>
-                    <p>Level ${khanateInfo.level}</p>
+            <div class="battle-comparison">
+                <div class="army-comparison">
+                    <div class="my-army">
+                        <h3>Your Army</h3>
+                        <div class="army-stats">
+                            <div class="troop-stat">
+                                <img src="images/troops/archer.png" alt="Archers">
+                                <span>${myStats.archers} Archers</span>
+                            </div>
+                            <div class="troop-stat">
+                                <img src="images/troops/cavalry.png" alt="Cavalry">
+                                <span>${myStats.cavalry} Cavalry</span>
+                            </div>
+                        </div>
+                        <div class="bonuses">
+                            ${myBonuses.archerBonus > 0 ? `<div class="bonus">+${myBonuses.archerBonus}% Archer Bonus</div>` : ''}
+                            ${myBonuses.cavalryBonus > 0 ? `<div class="bonus">+${myBonuses.cavalryBonus}% Cavalry Bonus</div>` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="battle-prediction">
+                        <div class="win-chance" style="--chance: ${winChance}%">
+                            <div class="chance-bar"></div>
+                            <span>${Math.round(winChance)}% Win Chance</span>
+                        </div>
+                        <div class="power-comparison">
+                            <div>Power: ${myPower}</div>
+                            <div>vs</div>
+                            <div>Power: ${opponentPower}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="opponent-army">
+                        <h3>${khanateInfo.name}'s Army</h3>
+                        <div class="army-stats">
+                            <div class="troop-stat">
+                                <img src="images/troops/archer.png" alt="Archers">
+                                <span>${khanateInfo.archers} Archers</span>
+                            </div>
+                            <div class="troop-stat">
+                                <img src="images/troops/cavalry.png" alt="Cavalry">
+                                <span>${khanateInfo.cavalry} Cavalry</span>
+                            </div>
+                        </div>
+                        <div class="bonuses">
+                            ${opponentBonuses.archerBonus > 0 ? `<div class="bonus">+${opponentBonuses.archerBonus}% Archer Bonus</div>` : ''}
+                            ${opponentBonuses.cavalryBonus > 0 ? `<div class="bonus">+${opponentBonuses.cavalryBonus}% Cavalry Bonus</div>` : ''}
+                        </div>
+                    </div>
                 </div>
-                <div class="opponent-stats">
-                    <div>Archers: ${khanateInfo.archers}</div>
-                    <div>Cavalry: ${khanateInfo.cavalry}</div>
+                
+                <div class="battle-tips">
+                    <h4>Battle Tips</h4>
+                    ${this.getBattleTips(winChance, myPower, opponentPower)}
                 </div>
+                
+                <button class="action-button battle-button" onclick="window.game.battle('${account}')">
+                    <span class="button-icon">⚔️</span>
+                    Start Battle
+                </button>
             </div>
         `;
+    }
+
+    getBattleTips(winChance, myPower, opponentPower) {
+        const tips = [];
+        
+        if (winChance < 40) {
+            tips.push("⚠️ This battle is risky! Consider recruiting more troops first.");
+            if (myPower < opponentPower * 0.5) {
+                tips.push("❌ High risk of heavy losses. Not recommended!");
+            }
+        } else if (winChance > 70) {
+            tips.push("✅ You have a strong advantage in this battle!");
+            if (myPower > opponentPower * 2) {
+                tips.push("💪 Overwhelming force! Expect minimal losses.");
+            }
+        } else {
+            tips.push("⚖️ This is an even match. Prepare for some losses.");
+        }
+        
+        return tips.map(tip => `<div class="battle-tip">${tip}</div>`).join('');
+    }
+
+    async getBatyrBonuses(account) {
+        let archerBonus = 0;
+        let cavalryBonus = 0;
+        
+        for (let i = 1; i <= 5; i++) {
+            const hasBatyr = await this.contract.methods.hasBatyr(account, i).call();
+            if (hasBatyr) {
+                const batyr = await this.contract.methods.getBatyrStats(i).call();
+                archerBonus += parseInt(batyr.archerBonus) - 100;
+                cavalryBonus += parseInt(batyr.cavalryBonus) - 100;
+            }
+        }
+        
+        return { archerBonus, cavalryBonus };
+    }
+
+    async calculateTotalPower(account) {
+        try {
+            const stats = await this.contract.methods.getKhanateStats(account).call();
+            const archerPower = parseInt(stats.archers) * 10;
+            const cavalryPower = parseInt(stats.cavalry) * 20;
+            let totalPower = archerPower + cavalryPower;
+            
+            // Apply Batyr bonuses
+            const bonuses = await this.getBatyrBonuses(account);
+            totalPower *= (1 + (bonuses.archerBonus + bonuses.cavalryBonus) / 200);
+            
+            return Math.round(totalPower);
+        } catch (error) {
+            console.error('Error calculating power:', error);
+            return 0;
+        }
     }
 
     async showBattleMap() {
@@ -709,13 +1278,9 @@ class KazakhKhanateGame {
                         nameLabel.className = 'khanate-name-label';
                         nameLabel.textContent = khanateInfo.name;
                         
-                        markerContainer.addEventListener('mouseover', () => {
-                            this.showOpponentDetails(account, khanateInfo);
-                        });
-                        
+                        // Change to click event for showing details
                         markerContainer.addEventListener('click', () => {
-                            this.battle(account);
-                            battleModal.classList.add('hidden');
+                            this.showKhanateDetails(account, khanateInfo);
                         });
 
                         markerContainer.appendChild(marker);
@@ -723,30 +1288,44 @@ class KazakhKhanateGame {
                         battleMarkers.appendChild(markerContainer);
                     }
                 } catch (error) {
-                    console.error('Error getting opponent info:', error);
+                    // Skip opponents without initialized Khanates
+                    if (!error.message.includes('Khanate not initialized')) {
+                        console.error('Error getting opponent info:', error);
+                    }
                 }
             }
         }
 
         // Add marker for current player
-        const currentPosition = this.accountLocations[this.account];
-        if (currentPosition) {
-            const markerContainer = document.createElement('div');
-            markerContainer.className = 'map-marker-container';
-            markerContainer.style.left = `${currentPosition.x}%`;
-            markerContainer.style.top = `${currentPosition.y}%`;
+        if (this.account) {
+            const currentPosition = this.accountLocations[this.account];
+            if (currentPosition) {
+                try {
+                    const currentKhanate = await this.contract.methods.getKhanateStats(this.account).call();
+                    if (currentKhanate.name) {
+                        const markerContainer = document.createElement('div');
+                        markerContainer.className = 'map-marker-container';
+                        markerContainer.style.left = `${currentPosition.x}%`;
+                        markerContainer.style.top = `${currentPosition.y}%`;
 
-            const marker = document.createElement('div');
-            marker.className = 'map-marker current';
+                        const marker = document.createElement('div');
+                        marker.className = 'map-marker current';
 
-            const nameLabel = document.createElement('div');
-            nameLabel.className = 'khanate-name-label';
-            const currentKhanate = await this.contract.methods.getKhanateStats(this.account).call();
-            nameLabel.textContent = currentKhanate.name;
+                        const nameLabel = document.createElement('div');
+                        nameLabel.className = 'khanate-name-label';
+                        nameLabel.textContent = currentKhanate.name;
 
-            markerContainer.appendChild(marker);
-            markerContainer.appendChild(nameLabel);
-            battleMarkers.appendChild(markerContainer);
+                        markerContainer.appendChild(marker);
+                        markerContainer.appendChild(nameLabel);
+                        battleMarkers.appendChild(markerContainer);
+                    }
+                } catch (error) {
+                    // Ignore initialization errors
+                    if (!error.message.includes('Khanate not initialized')) {
+                        console.error('Error getting current Khanate info:', error);
+                    }
+                }
+            }
         }
 
         if (!hasOpponents) {
@@ -754,6 +1333,244 @@ class KazakhKhanateGame {
         }
 
         battleModal.classList.remove('hidden');
+    }
+
+    async checkActiveBattles() {
+        // Cache check for 5 seconds to avoid too many calls
+        if (Date.now() - this.lastBattleCheck < 5000) {
+            return this.activeBattles || [];
+        }
+
+        try {
+            // Get battle count from contract events instead
+            const activeBattles = [];
+            const events = await this.contract.getPastEvents('BattleInitiated', {
+                fromBlock: 0,
+                toBlock: 'latest'
+            });
+            
+            for (const event of events) {
+                const battleId = event.returnValues.battleId;
+                const battle = await this.contract.methods.activeBattles(battleId).call();
+                
+                // Check if battle is valid, not resolved, and involves the current account
+                if (battle.attacker !== '0x0000000000000000000000000000000000000000' && // Valid battle
+                    !battle.resolved && 
+                    (battle.attacker.toLowerCase() === this.account.toLowerCase() || 
+                     battle.defender.toLowerCase() === this.account.toLowerCase())) {
+                    
+                    // Check if battle should be completed based on time
+                    const currentTime = Math.floor(Date.now() / 1000);
+                    const battleStartTime = parseInt(battle.startTime);
+                    const travelTime = parseInt(battle.travelTime);
+                    
+                    if (currentTime < battleStartTime + travelTime) {
+                        // Battle is still in progress
+                        activeBattles.push({...battle, battleId});
+                    } else {
+                        try {
+                            // Check if battle can be executed
+                            const canExecute = await this.contract.methods.activeBattles(battleId).call();
+                            if (!canExecute.resolved) {
+                                await this.contract.methods.executeBattle(battleId).send({
+                                    from: this.account,
+                                    gas: 300000
+                                });
+                            }
+                        } catch (error) {
+                            // Only log error if it's not about troops still traveling
+                            if (!error.message.includes('Troops still traveling')) {
+                                console.error('Error executing ready battle:', error);
+                            }
+                            // If battle can't be executed yet, add it to active battles
+                            activeBattles.push({...battle, battleId});
+                        }
+                    }
+                }
+            }
+            
+            this.activeBattles = activeBattles;
+            this.lastBattleCheck = Date.now();
+            return activeBattles;
+        } catch (error) {
+            console.error('Error checking active battles:', error);
+            return [];
+        }
+    }
+
+    async refreshActiveBattles() {
+        const activeBattles = await this.checkActiveBattles();
+        
+        // Clear old movements
+        this.globalMovements.clear();
+        document.getElementById('troop-movements').innerHTML = '';
+        
+        // Recreate movements for active battles
+        for (const battle of activeBattles) {
+            if (!battle.resolved) {
+                const sourcePos = this.accountLocations[battle.attacker];
+                const targetPos = this.accountLocations[battle.defender];
+                const elapsed = (Date.now() / 1000) - parseInt(battle.startTime);
+                const totalTime = parseInt(battle.travelTime) * 1000;
+                const remaining = Math.max(0, totalTime - (elapsed * 1000));
+                
+                if (remaining > 0) {
+                    const movementId = Date.now() + Math.random();
+                    this.createTroopMovement(sourcePos, targetPos, totalTime, movementId);
+                }
+            }
+        }
+    }
+
+    showAchievementBadge(achievement) {
+        const badges = {
+            FIRST_BLOOD: { name: "First Blood", description: "Win your first battle" },
+            VETERAN: { name: "Veteran", description: "Win 10 battles" },
+            WARLORD: { name: "Warlord", description: "Win 50 battles" },
+            DEFENDER: { name: "Stalwart Defender", description: "Successfully defend 5 times" },
+            COLLECTOR: { name: "Batyr Collector", description: "Collect all Batyrs" }
+        };
+
+        const badge = badges[achievement];
+        if (!badge) return;
+
+        const badgeElement = document.createElement('div');
+        badgeElement.className = 'achievement-badge';
+        badgeElement.innerHTML = `
+            <h4>🏆 Achievement Unlocked!</h4>
+            <div class="badge-name">${badge.name}</div>
+            <div class="badge-description">${badge.description}</div>
+        `;
+
+        document.body.appendChild(badgeElement);
+        setTimeout(() => {
+            badgeElement.remove();
+        }, 5000);
+    }
+
+    async showKhanateDetails(account, khanateInfo) {
+        // Create details modal
+        const detailsModal = document.createElement('div');
+        detailsModal.className = 'modal khanate-details-modal';
+        
+        // Get battle comparison data
+        const myStats = await this.contract.methods.getKhanateStats(this.account).call();
+        const myPower = await this.calculateTotalPower(this.account);
+        const opponentPower = await this.calculateTotalPower(account);
+        const totalPower = myPower + opponentPower;
+        const winChance = Math.min(90, Math.max(10, (myPower / totalPower) * 100));
+        const myBonuses = await this.getBatyrBonuses(this.account);
+        const opponentBonuses = await this.getBatyrBonuses(account);
+        
+        // Get random strategic quote
+        const quote = this.getRandomQuote('kazakh');
+        
+        detailsModal.innerHTML = `
+            <div class="modal-content khanate-details-content">
+                <div class="modal-header">
+                    <h2>Battle Details</h2>
+                    <button class="close-button">×</button>
+                </div>
+                
+                <div class="strategic-quote">
+                    <p>${quote.text}</p>
+                    <cite>- ${quote.author}</cite>
+                </div>
+                
+                <div class="battle-comparison">
+                    <div class="army-comparison">
+                        <div class="my-army">
+                            <h3>Your Army</h3>
+                            <div class="army-stats">
+                                <div class="troop-stat">
+                                    <img src="images/troops/archer.png" alt="Archers">
+                                    <span>${myStats.archers} Archers</span>
+                                </div>
+                                <div class="troop-stat">
+                                    <img src="images/troops/cavalry.png" alt="Cavalry">
+                                    <span>${myStats.cavalry} Cavalry</span>
+                                </div>
+                            </div>
+                            <div class="bonuses">
+                                ${myBonuses.archerBonus > 0 ? `<div class="bonus">+${myBonuses.archerBonus}% Archer Bonus</div>` : ''}
+                                ${myBonuses.cavalryBonus > 0 ? `<div class="bonus">+${myBonuses.cavalryBonus}% Cavalry Bonus</div>` : ''}
+                            </div>
+                        </div>
+                        
+                        <div class="battle-prediction">
+                            <div class="win-chance" style="--chance: ${winChance}%">
+                                <div class="chance-bar"></div>
+                                <span>${Math.round(winChance)}% Win Chance</span>
+                            </div>
+                            <div class="power-comparison">
+                                <div>Power: ${myPower}</div>
+                                <div>vs</div>
+                                <div>Power: ${opponentPower}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="opponent-army">
+                            <h3>${khanateInfo.name}'s Army</h3>
+                            <div class="army-stats">
+                                <div class="troop-stat">
+                                    <img src="images/troops/archer.png" alt="Archers">
+                                    <span>${khanateInfo.archers} Archers</span>
+                                </div>
+                                <div class="troop-stat">
+                                    <img src="images/troops/cavalry.png" alt="Cavalry">
+                                    <span>${khanateInfo.cavalry} Cavalry</span>
+                                </div>
+                            </div>
+                            <div class="bonuses">
+                                ${opponentBonuses.archerBonus > 0 ? `<div class="bonus">+${opponentBonuses.archerBonus}% Archer Bonus</div>` : ''}
+                                ${opponentBonuses.cavalryBonus > 0 ? `<div class="bonus">+${opponentBonuses.cavalryBonus}% Cavalry Bonus</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="battle-tips">
+                        <h4>Battle Tips</h4>
+                        ${this.getBattleTips(winChance, myPower, opponentPower)}
+                    </div>
+                    
+                    <div class="troop-loss-preview">
+                        <h4>Potential Losses</h4>
+                        <div class="loss-scenarios">
+                            <div class="loss-scenario">
+                                <h5>If You Win</h5>
+                                <p>Archers: 5-15%</p>
+                                <p>Cavalry: 5-15%</p>
+                            </div>
+                            <div class="loss-scenario">
+                                <h5>If You Lose</h5>
+                                <p>Archers: 30-50%</p>
+                                <p>Cavalry: 30-50%</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button class="action-button battle-button" onclick="window.game.battle('${account}')">
+                        <span class="button-icon">⚔️</span>
+                        Start Battle
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Add close button functionality
+        const closeButton = detailsModal.querySelector('.close-button');
+        closeButton.addEventListener('click', () => {
+            detailsModal.remove();
+        });
+        
+        // Close on outside click
+        detailsModal.addEventListener('click', (e) => {
+            if (e.target === detailsModal) {
+                detailsModal.remove();
+            }
+        });
+        
+        document.body.appendChild(detailsModal);
     }
 }
 

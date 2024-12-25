@@ -9,11 +9,13 @@
 <body>
     <div class="container">
         <header>
-            <div class="header-content">
-                <h1>Kazakh Khanate Game</h1>
+            <div class="header-content container">
+                <div class="header-left">
+                    <img src="images/flags/kazakhstan_flag.png" alt="Kazakhstan Flag" class="header-flag">
+                    <h1>Kazakh Khanate</h1>
+                </div>
                 <div class="game-status">
-                    <p>Connected to: <strong>Ganache (Local Network)</strong></p>
-                    <p>Account: <span id="account-address">Connecting...</span></p>
+                    <p>Address: <span id="account-address">Not connected</span></p>
                     <p>Balance: <span id="account-balance">0</span> ETH</p>
                     <button id="switch-account" class="header-button">Switch Account</button>
                     <button id="logout" class="header-button">Logout</button>
@@ -21,125 +23,150 @@
             </div>
         </header>
 
-        <main>
-            <!-- Account Selection Screen -->
-            <section id="account-selection" class="hidden">
-                <h2>Select Your Account</h2>
-                <div class="map-container">
-                    <img src="images/map/kazakhstan_map.png" alt="Kazakhstan Map" id="kazakhstan-map">
-                    <!-- Account markers will be added here dynamically -->
-                    <div id="account-markers"></div>
-                </div>
-                <div class="accounts-list">
-                    <!-- Available accounts will be listed here -->
+        <div class="container">
+            <!-- Welcome Section -->
+            <section id="welcome-guide" class="welcome-message">
+                <h2>Welcome to the Kazakh Khanate Game!</h2>
+                <p>Build your Khanate, train troops, collect legendary Batyrs, and conquer the steppes!</p>
+                <div class="guide-notes">
+                    <div class="guide-note">
+                        <h3>🎁 Lucky Boxes</h3>
+                        <p>Purchase lucky boxes to acquire legendary Batyrs. Each Batyr has unique abilities that can enhance your troops or provide defensive bonuses.</p>
+                    </div>
+                    <div class="guide-note">
+                        <h3>⚔️ Battles</h3>
+                        <p>Strategic battles take time as your troops travel across the steppes. Plan your attacks carefully and watch for incoming enemies!</p>
+                    </div>
+                    <div class="guide-note">
+                        <h3>🏆 Achievements</h3>
+                        <p>Earn badges and glory through victories. Your battle record and achievements are permanently recorded in the blockchain.</p>
+                    </div>
                 </div>
             </section>
 
+            <!-- Khanate Creation -->
             <section id="khanate-creation" class="hidden">
-                <div class="welcome-message">
-                    <h2>Welcome to Kazakh Khanate</h2>
-                    <p>Create your own Khanate and begin your journey to become the greatest leader!</p>
-                </div>
+                <h2>Create Your Khanate</h2>
                 <div class="creation-form">
                     <input type="text" id="khanate-name" placeholder="Enter your Khanate name">
-                    <button id="create-khanate">Create Khanate</button>
+                    <button id="create-khanate" class="action-button">
+                        <span class="button-icon">⚔️</span>
+                        Create Khanate
+                    </button>
                 </div>
             </section>
 
+            <!-- Khanate Info -->
             <section id="khanate-info" class="hidden">
-                <h2>Your Khanate</h2>
-                <div class="stats">
-                    <div class="khanate-details">
-                        <p>Name: <span id="player-name"></span></p>
-                        <p>Level: <span id="player-level"></span></p>
-                    </div>
+                <div class="khanate-details">
+                    <h2>Khanate: <span id="player-name"></span></h2>
+                    <p>Level: <span id="player-level"></span></p>
                     <div class="troops">
                         <div class="troop">
-                            <img src="images/troops/archer.png" alt="Archer">
-                            <p>Archers: <span id="archer-count">0</span></p>
+                            <img src="images/troops/archer.png" alt="Archers">
+                            <h3>Archers</h3>
+                            <p>Count: <span id="archer-count">0</span></p>
                         </div>
                         <div class="troop">
                             <img src="images/troops/cavalry.png" alt="Cavalry">
-                            <p>Cavalry: <span id="cavalry-count">0</span></p>
+                            <h3>Cavalry</h3>
+                            <p>Count: <span id="cavalry-count">0</span></p>
                         </div>
                     </div>
                 </div>
             </section>
 
+            <!-- Batyrs Section -->
             <section id="batyrs" class="hidden">
                 <h2>Your Batyrs</h2>
-                <div class="batyr-list">
-                    <!-- Batyrs will be dynamically added here -->
+                <div class="guide-note batyr-guide">
+                    <p>Batyrs are legendary warriors who can enhance your troops. Some provide battle strength, while others offer defensive bonuses. Collect them all!</p>
                 </div>
+                <div class="batyr-list"></div>
             </section>
 
+            <!-- Actions -->
             <section id="actions" class="hidden">
-                <h2>Actions</h2>
                 <div class="action-buttons">
                     <button id="purchase-troops" class="action-button">
-                        <img src="images/troops/archer.png" alt="Purchase" class="button-icon">
+                        <span class="button-icon">👥</span>
                         Purchase Troops
                     </button>
                     <button id="purchase-lucky-box" class="action-button">
-                        <img src="images/troops/lucky-box.png" alt="Lucky Box" class="button-icon">
-                        Lucky Box (0.1 ETH)
+                        <span class="button-icon">🎁</span>
+                        Lucky Box
                     </button>
                     <button id="battle" class="action-button">
-                        <img src="images/troops/battle.png" alt="Battle" class="button-icon">
+                        <span class="button-icon">⚔️</span>
                         Battle
                     </button>
                 </div>
             </section>
 
-            <!-- Battle Map Modal -->
-            <div id="battle-modal" class="modal hidden">
-                <div class="modal-content battle-map-content">
-                    <div class="modal-header">
-                        <h3>Select Opponent from Map</h3>
-                        <button class="close-button" id="cancel-battle">&times;</button>
-                    </div>
-                    <div class="map-container">
-                        <img src="images/map/kazakhstan_map.png" alt="Kazakhstan Map" id="battle-map">
-                        <div id="battle-markers">
-                            <!-- Battle markers will be added here dynamically -->
-                        </div>
-                    </div>
-                    <div id="opponent-list">
-                        <!-- Opponent details will appear here when hovering over markers -->
-                    </div>
-                </div>
-            </div>
-
             <!-- Purchase Modal -->
             <div id="purchase-modal" class="modal hidden">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>Purchase Troops</h3>
-                        <button class="close-button" id="cancel-purchase">&times;</button>
+                        <h2>Purchase Troops</h2>
+                        <button class="close-button" id="cancel-purchase">×</button>
                     </div>
-                    <div class="purchase-form">
-                        <div class="troop-input">
-                            <label for="archer-amount">
-                                <img src="images/troops/archer.png" alt="Archer" class="input-icon">
-                                Archers (0.01 ETH each):
-                            </label>
-                            <input type="number" id="archer-amount" min="0" value="0">
-                        </div>
-                        <div class="troop-input">
-                            <label for="cavalry-amount">
-                                <img src="images/troops/cavalry.png" alt="Cavalry" class="input-icon">
-                                Cavalry (0.02 ETH each):
-                            </label>
-                            <input type="number" id="cavalry-amount" min="0" value="0">
-                        </div>
-                        <div class="purchase-summary">
-                            <p>Total Cost: <span id="purchase-cost">0</span> ETH</p>
-                            <button id="confirm-purchase">Confirm Purchase</button>
-                        </div>
+                    <div class="strategic-quote">
+                        <p>"The supreme art of war is to subdue the enemy without fighting."</p>
+                        <cite>- Sun Tzu</cite>
+                    </div>
+                    <div class="troop-input">
+                        <label>
+                            <img src="images/troops/archer.png" alt="Archer" class="input-icon">
+                            Archers (0.01 ETH each)
+                        </label>
+                        <input type="number" id="archer-amount" min="0" value="0">
+                    </div>
+                    <div class="troop-input">
+                        <label>
+                            <img src="images/troops/cavalry.png" alt="Cavalry" class="input-icon">
+                            Cavalry (0.02 ETH each)
+                        </label>
+                        <input type="number" id="cavalry-amount" min="0" value="0">
+                    </div>
+                    <div class="purchase-summary">
+                        <p>Total Cost: <span id="purchase-cost">0</span> ETH</p>
+                        <button id="confirm-purchase" class="action-button">
+                            <span class="button-icon">💰</span>
+                            Confirm Purchase
+                        </button>
                     </div>
                 </div>
             </div>
-        </main>
+
+            <!-- Battle Modal -->
+            <div id="battle-modal" class="modal hidden">
+                <div class="modal-content battle-map-content">
+                    <div class="modal-header">
+                        <h2>Choose Your Opponent</h2>
+                        <button class="close-button" id="cancel-battle">×</button>
+                    </div>
+                    <div class="strategic-quote">
+                        <p>"Victory belongs to the most persevering."</p>
+                        <cite>- Napoleon Bonaparte</cite>
+                    </div>
+                    <div class="map-container">
+                        <img src="images/map/kazakhstan_map.png" alt="Map of Kazakhstan">
+                        <div id="battle-markers"></div>
+                        <div id="troop-movements"></div>
+                    </div>
+                    <div id="opponent-list"></div>
+                </div>
+            </div>
+
+            <!-- Account Selection -->
+            <section id="account-selection" class="hidden">
+                <h2>Select Your Account</h2>
+                <div class="map-container">
+                    <img src="images/map/kazakhstan_map.png" alt="Map of Kazakhstan">
+                    <div id="account-markers"></div>
+                </div>
+            </section>
+        </div>
 
         <div id="notification" class="hidden">
             <p id="notification-text"></p>
