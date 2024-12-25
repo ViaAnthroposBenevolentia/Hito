@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0xbA5CB4AABB9D34Bc321946fd8D666B6Ff7A26c7a';
+        this.contractAddress = '0x5C394042CEBcc94820bA8909c950e4EEeC5C84b1';
         this.accounts = [];
         this.accountLocations = {}; // Will store account locations on the map
         this.setupEventListeners();
