@@ -537,10 +537,26 @@ class KazakhKhanateGame {
     showNotification(message, duration = 3000) {
         const notification = document.getElementById('notification');
         const notificationText = document.getElementById('notification-text');
+        
+        // Add CSS class for notifications with buttons
+        if (message.includes('view-map-button')) {
+            notification.classList.add('with-button');
+        } else {
+            notification.classList.remove('with-button');
+        }
+        
         notificationText.innerHTML = message; // Allow HTML in notifications
         notification.classList.remove('hidden');
-        setTimeout(() => {
+        
+        // Clear any existing timeout
+        if (this.notificationTimeout) {
+            clearTimeout(this.notificationTimeout);
+        }
+        
+        // Set new timeout
+        this.notificationTimeout = setTimeout(() => {
             notification.classList.add('hidden');
+            notification.classList.remove('with-button');
         }, duration);
     }
 
@@ -554,6 +570,21 @@ class KazakhKhanateGame {
 
             console.log('⚔️ Initiating battle with opponent:', opponent);
             
+            // Hide achievements section and details modal
+            const achievementsSection = document.getElementById('achievements-section');
+            if (achievementsSection) {
+                achievementsSection.classList.add('hidden');
+            }
+            
+            // Remove any existing Khanate details modal
+            const detailsModal = document.querySelector('.khanate-details-modal');
+            if (detailsModal) {
+                detailsModal.remove();
+            }
+
+            // Hide battle modal
+            document.getElementById('battle-modal').classList.add('hidden');
+
             // Verify opponent's Khanate exists and has troops
             try {
                 const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
@@ -603,19 +634,25 @@ class KazakhKhanateGame {
             // Add to active movements
             this.activeMovements.set(movementId, battleData);
             
-            // Show travel notification
-            this.showNotification(`⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds`);
-            
-            // Schedule battle execution with a small delay after travel time
-            setTimeout(() => this.executeBattle(battleId), travelTime + 2000);
-            
-            // Hide battle modal
-            document.getElementById('battle-modal').classList.add('hidden');
+            // Show travel notification with View on Map button
+            this.showNotification(`
+                ⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds
+                <button class="view-map-button" onclick="window.game.viewBattleOnMap()">View on Map</button>
+            `, travelTime + 2000);
             
         } catch (error) {
             console.error('🐞 Battle error:', error);
             this.showNotification('❌ Battle failed: ' + error.message);
         }
+    }
+
+    viewBattleOnMap() {
+        // Hide the notification
+        const notification = document.getElementById('notification');
+        notification.classList.add('hidden');
+        
+        // Show the battle map
+        this.showBattleMap();
     }
 
     calculateDistance(pos1, pos2) {
@@ -1073,7 +1110,7 @@ class KazakhKhanateGame {
                 await this.showBattleMap();
             } catch (error) {
                 console.error('Error loading battle map:', error);
-                this.showNotification('��� Failed to load opponents');
+                this.showNotification('❌ Failed to load opponents');
             }
         });
 

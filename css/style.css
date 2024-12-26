@@ -1256,4 +1256,44 @@ section {
     color: var(--primary-color);
     margin-bottom: 15px;
     text-align: center;
-} 
+}
+
+.notification {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    transition: opacity 0.3s;
+}
+
+.notification.with-button {
+    padding: 15px;
+    max-width: 400px;
+}
+
+.view-map-button {
+    display: block;
+    margin-top: 10px;
+    padding: 8px 16px;
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.view-map-button:hover {
+    background-color: #357abd;
+}
+
+.notification.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
