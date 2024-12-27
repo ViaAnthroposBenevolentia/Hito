@@ -140,6 +140,10 @@ class KazakhKhanateGame {
                 if (!this.accounts || this.accounts.length === 0) {
                     throw new Error('Please create an account in MetaMask to use this dApp.');
                 }
+
+                // Set the current account
+                this.account = this.accounts[0];
+                console.log('📝 Set current account:', this.account);
             } catch (error) {
                 if (error.code === 4001) {
                     throw new Error('Please connect your MetaMask wallet to continue. Click the MetaMask icon and connect your account.');
@@ -159,9 +163,7 @@ class KazakhKhanateGame {
                 await this.switchToBSCTestnet();
             }
             
-            console.log('📝 Connected account:', this.accounts[0]);
-            
-            if (this.accounts.length > 0) {
+            if (this.account) {
                 await this.loadContract();
                 
                 // Verify contract
@@ -182,21 +184,22 @@ class KazakhKhanateGame {
                 
                 console.log('✅ Contract verified at address:', this.contractAddress);
 
-                // Show account selection if no account is selected
-                if (!this.account) {
-                    this.showAccountSelection();
-                } else {
-                    await this.initializeWithAccount(this.account);
-                }
+                // Show account selection
+                this.showAccountSelection();
             }
 
             // Listen for account changes
-            window.ethereum.on('accountsChanged', (accounts) => {
+            window.ethereum.on('accountsChanged', async (accounts) => {
                 if (accounts.length === 0) {
                     // User disconnected all accounts
+                    this.account = null;
                     this.showNotification('❌ Please connect your MetaMask wallet to continue');
+                } else {
+                    // Update current account
+                    this.account = accounts[0];
+                    console.log('Account changed to:', this.account);
+                    this.showAccountSelection();
                 }
-                window.location.reload();
             });
 
             // Listen for chain changes
@@ -206,20 +209,7 @@ class KazakhKhanateGame {
 
         } catch (error) {
             console.error('🐞 Initialization error:', error);
-            
-            // Show a more user-friendly error message
-            let errorMessage = error.message;
-            if (error.code === 4001) {
-                errorMessage = 'Please connect your MetaMask wallet to continue. Click the MetaMask icon and connect your account.';
-            }
-            
-            // Add a reconnect button to the notification
-            this.showNotification(`
-                ❌ ${errorMessage}
-                <button class="reconnect-button" onclick="window.game.reconnectWallet()">
-                    🔄 Reconnect Wallet
-                </button>
-            `, 10000); // Show for 10 seconds
+            this.showNotification('❌ ' + error.message);
         }
     }
 
