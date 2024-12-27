@@ -266,28 +266,15 @@ class KazakhKhanateGame {
         // Ensure account is lowercase for consistent comparison
         const normalizedAccount = account.toLowerCase();
         
-        // First check stored locations
-        if (this.accountLocations[normalizedAccount]) {
-            return this.accountLocations[normalizedAccount];
-        }
-        
-        // If no stored location, get from blockchain
         try {
             const khanateInfo = await this.contract.methods.getKhanateStats(normalizedAccount).call();
-            const position = {
+            return {
                 x: parseInt(khanateInfo.locationX),
                 y: parseInt(khanateInfo.locationY)
             };
-            
-            // Store the position for future use
-            this.accountLocations[normalizedAccount] = position;
-            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
-            
-            return position;
         } catch (error) {
             console.error('Error getting account position:', error);
-            // Return default position if there's an error
-            return { x: 50, y: 50 };
+            return null;
         }
     }
 
@@ -832,30 +819,15 @@ class KazakhKhanateGame {
                 throw new Error('You have no troops to battle with');
             }
 
-            // Get positions and wait for them to resolve
+            // Get positions from blockchain
             const sourcePos = await this.getAccountPosition(this.account);
             const targetPos = await this.getAccountPosition(opponent);
             
-            // Verify positions exist
-            if (!sourcePos || !targetPos || !sourcePos.x || !sourcePos.y || !targetPos.x || !targetPos.y) {
-                console.log('Missing positions, using stored locations');
-                // If positions are missing, use stored locations
-                if (!this.accountLocations[this.account.toLowerCase()]) {
-                    this.accountLocations[this.account.toLowerCase()] = { x: 25, y: 30 }; // Default position for attacker
-                }
-                if (!this.accountLocations[opponent.toLowerCase()]) {
-                    this.accountLocations[opponent.toLowerCase()] = { x: 75, y: 70 }; // Default position for defender
-                }
-                localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+            if (!sourcePos || !targetPos) {
+                throw new Error('Could not determine battle positions');
             }
-            
-            // Get final positions
-            const finalSourcePos = this.accountLocations[this.account.toLowerCase()] || sourcePos;
-            const finalTargetPos = this.accountLocations[opponent.toLowerCase()] || targetPos;
-            
-            console.log('Battle positions:', { source: finalSourcePos, target: finalTargetPos });
-            
-            // Initiate battle on blockchain first to get the travel time
+
+            // Initiate battle transaction
             console.log('Initiating battle transaction...');
             const result = await this.contract.methods.initiateBattle(opponent)
                 .send({ 
@@ -865,14 +837,14 @@ class KazakhKhanateGame {
             
             console.log('Battle initiated successfully:', result);
             
-            // Get battle info to get the actual travel time
+            // Get battle info
             const battleId = result.events.BattleInitiated.returnValues.battleId;
             const battle = await this.contract.methods.activeBattles(battleId).call();
             const travelTime = parseInt(battle.travelTime) * 1000; // Convert to milliseconds
             
-            // Create troop movement animation with blockchain travel time
+            // Create troop movement animation
             const movementId = Date.now();
-            this.createTroopMovement(finalSourcePos, finalTargetPos, travelTime, movementId);
+            this.createTroopMovement(sourcePos, targetPos, travelTime, movementId);
             
             // Store battle data
             const battleData = {
@@ -880,13 +852,15 @@ class KazakhKhanateGame {
                 startTime: Date.now(),
                 travelTime,
                 movementId,
-                battleId
+                battleId,
+                sourcePos,
+                targetPos
             };
             
             // Add to active movements
             this.activeMovements.set(movementId, battleData);
             
-            // Show travel notification with View on Map button
+            // Show notification
             this.showNotification(`
                 ⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds
                 <button class="view-map-button" onclick="window.game.viewBattleOnMap()">View on Map</button>
@@ -919,13 +893,11 @@ class KazakhKhanateGame {
     }
 
     createTroopMovement(start, end, duration, movementId) {
-        // Verify start and end positions
         if (!start || !end || !start.x || !start.y || !end.x || !end.y) {
             console.error('Invalid positions for troop movement:', { start, end });
             return;
         }
 
-        // Store movement globally
         const movement = {
             start,
             end,
@@ -933,6 +905,7 @@ class KazakhKhanateGame {
             duration,
             movementId
         };
+        
         this.globalMovements.set(movementId, movement);
         this.renderTroopMovement(movement);
     }
@@ -944,66 +917,31 @@ class KazakhKhanateGame {
             existingPath.remove();
         }
 
-        // Calculate elapsed time and remaining duration
-        const elapsed = Date.now() - movement.startTime;
-        const remaining = Math.max(0, movement.duration - elapsed);
-        
-        if (remaining <= 0) {
-            this.globalMovements.delete(movement.movementId);
-            return;
-        }
+        // Calculate path
+        const dx = movement.end.x - movement.start.x;
+        const dy = movement.end.y - movement.start.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
 
         // Create path container
         const pathContainer = document.createElement('div');
         pathContainer.className = 'troop-path-container';
         pathContainer.id = `path-${movement.movementId}`;
-        
-        // Add speed up button
-        const speedUpButton = document.createElement('button');
-        speedUpButton.className = 'speed-up-button';
-        speedUpButton.innerHTML = `
-            ⚡ Speed Up
-            <span class="cost">(0.3 ETH)</span>
-        `;
-        speedUpButton.onclick = () => this.speedUpTroops(movement.movementId);
-        pathContainer.appendChild(speedUpButton);
-        
-        // Calculate path position and rotation
-        const dx = movement.end.x - movement.start.x;
-        const dy = movement.end.y - movement.start.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        
-        // Create dashed path line
+        pathContainer.style.left = `${movement.start.x}%`;
+        pathContainer.style.top = `${movement.start.y}%`;
+
+        // Create path
         const path = document.createElement('div');
         path.className = 'troop-path';
         path.style.width = `${distance}%`;
         path.style.transform = `rotate(${angle}deg)`;
         
-        // Create troops icon with current position
+        // Create troops
         const troops = document.createElement('div');
         troops.className = 'moving-troops';
-        troops.style.animation = `moveAlongPath ${remaining}ms linear`;
-        troops.style.left = `${(elapsed / movement.duration) * 100}%`;
-        
-        // Create timer
-        const timer = document.createElement('div');
-        timer.className = 'travel-timer';
-        timer.id = `timer-${movement.movementId}`;
-        
-        // Update timer
-        const updateTimer = () => {
-            const newElapsed = Date.now() - movement.startTime;
-            const newRemaining = Math.max(0, Math.ceil((movement.duration - newElapsed) / 1000));
-            timer.textContent = `${newRemaining}s`;
-            
-            if (newRemaining > 0) {
-                requestAnimationFrame(updateTimer);
-            }
-        };
-        requestAnimationFrame(updateTimer);
-        
-        // Add troops image with fallback
+        troops.style.animation = `moveAlongPath ${movement.duration}ms linear`;
+
+        // Add troops image
         const troopsImg = document.createElement('img');
         troopsImg.src = 'images/troops/troops.png';
         troopsImg.alt = 'Moving Troops';
@@ -1012,34 +950,34 @@ class KazakhKhanateGame {
             troops.style.fontSize = '20px';
         };
         troops.appendChild(troopsImg);
+
+        // Add timer
+        const timer = document.createElement('div');
+        timer.className = 'travel-timer';
+        timer.id = `timer-${movement.movementId}`;
         troops.appendChild(timer);
         
-        // Position the container
-        pathContainer.style.left = `${movement.start.x}%`;
-        pathContainer.style.top = `${movement.start.y}%`;
+        // Update timer
+        const updateTimer = () => {
+            const elapsed = Date.now() - movement.startTime;
+            const remaining = Math.max(0, Math.ceil((movement.duration - elapsed) / 1000));
+            if (timer) timer.textContent = `${remaining}s`;
+            if (remaining > 0) {
+                requestAnimationFrame(updateTimer);
+            }
+        };
+        requestAnimationFrame(updateTimer);
         
-        // Assemble everything
+        // Assemble and add to DOM
         path.appendChild(troops);
         pathContainer.appendChild(path);
         movementsContainer.appendChild(pathContainer);
         
-        // Clean up after animation and execute battle
-        setTimeout(async () => {
+        // Clean up after animation
+        setTimeout(() => {
             pathContainer.remove();
             this.globalMovements.delete(movement.movementId);
-            this.showBattleAnimation(movement.end.x, movement.end.y);
-            
-            // Get battle data from activeMovements
-            const battleData = this.activeMovements.get(movement.movementId);
-            if (battleData && battleData.battleId !== undefined) {
-                try {
-                    // Execute the battle
-                    await this.executeBattle(battleData.battleId);
-                } catch (error) {
-                    console.error('Error executing battle:', error);
-                }
-            }
-        }, remaining);
+        }, movement.duration);
     }
 
     showBattleAnimation(x, y) {
