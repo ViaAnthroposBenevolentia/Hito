@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/Counters.sol";
 contract KazakhKhanate is ReentrancyGuard {
     using Counters for Counters.Counter;
 
+    // Add array to track active Khanates
+    address[] public activeKhanates;
+    mapping(address => uint256) private khanateIndex;
+    
     struct Khanate {
         string name;
         uint256 level;
@@ -131,6 +135,10 @@ contract KazakhKhanate is ReentrancyGuard {
             successfulDefenses: 0,
             initialized: true
         });
+
+        // Add to active Khanates array
+        activeKhanates.push(msg.sender);
+        khanateIndex[msg.sender] = activeKhanates.length - 1;
 
         emit KhanateCreated(msg.sender, name);
     }
@@ -386,5 +394,64 @@ contract KazakhKhanate is ReentrancyGuard {
             achievements[player]["DEFENDER"],
             achievements[player]["COLLECTOR"]
         );
+    }
+
+    // Add function to get all active Khanates
+    function getActiveKhanates() external view returns (address[] memory) {
+        return activeKhanates;
+    }
+
+    // Add function to get Khanates in chunks
+    function getKhanatesByRange(uint256 start, uint256 end) 
+        external 
+        view 
+        returns (
+            address[] memory addresses,
+            string[] memory names,
+            uint256[] memory levels,
+            uint256[] memory archerCounts,
+            uint256[] memory cavalryCounts
+        ) 
+    {
+        require(start <= end && end < activeKhanates.length, "Invalid range");
+        uint256 size = end - start + 1;
+        
+        addresses = new address[](size);
+        names = new string[](size);
+        levels = new uint256[](size);
+        archerCounts = new uint256[](size);
+        cavalryCounts = new uint256[](size);
+        
+        for (uint256 i = 0; i < size; i++) {
+            address khanateAddress = activeKhanates[start + i];
+            Khanate storage khanate = khanates[khanateAddress];
+            
+            addresses[i] = khanateAddress;
+            names[i] = khanate.name;
+            levels[i] = khanate.level;
+            archerCounts[i] = khanate.archers;
+            cavalryCounts[i] = khanate.cavalry;
+        }
+        
+        return (addresses, names, levels, archerCounts, cavalryCounts);
+    }
+
+    // Add function to remove inactive Khanates (optional, for maintenance)
+    function removeInactiveKhanate(address khanateAddress) external {
+        require(msg.sender == khanateAddress, "Can only remove own Khanate");
+        require(khanates[khanateAddress].initialized, "Khanate not initialized");
+        
+        uint256 index = khanateIndex[khanateAddress];
+        uint256 lastIndex = activeKhanates.length - 1;
+        
+        if (index != lastIndex) {
+            address lastKhanate = activeKhanates[lastIndex];
+            activeKhanates[index] = lastKhanate;
+            khanateIndex[lastKhanate] = index;
+        }
+        
+        activeKhanates.pop();
+        delete khanateIndex[khanateAddress];
+        delete khanates[khanateAddress];
     }
 } 

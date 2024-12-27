@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0xe9E88685cA987b83c82857649b07eb35a948B600';
+        this.contractAddress = '0xAdBBEBF95A7c6065FA571cC35CC61F6f0F070e8f';
         this.accounts = [];
         this.accountLocations = {};
         this.activeMovements = new Map();
@@ -209,52 +209,52 @@ class KazakhKhanateGame {
         const khanates = new Map();
         
         try {
-            // Get the latest block number
-            const latestBlock = await this.web3.eth.getBlockNumber();
+            // Get total number of active Khanates
+            const activeKhanates = await this.contract.methods.getActiveKhanates().call();
+            const totalKhanates = activeKhanates.length;
             
-            // Look for KhanateCreated events in chunks of 2000 blocks
-            const chunkSize = 2000;
-            const fromBlock = Math.max(0, latestBlock - 10000); // Still look at last 10000 blocks
+            if (totalKhanates === 0) {
+                return khanates;
+            }
             
-            // Process blocks in chunks
-            for (let startBlock = fromBlock; startBlock < latestBlock; startBlock += chunkSize) {
-                const endBlock = Math.min(startBlock + chunkSize - 1, latestBlock);
+            // Fetch Khanates in chunks of 20
+            const chunkSize = 20;
+            for (let start = 0; start < totalKhanates; start += chunkSize) {
+                const end = Math.min(start + chunkSize - 1, totalKhanates - 1);
                 
                 try {
-                    // Get events for this chunk
-                    const events = await this.contract.getPastEvents('KhanateCreated', {
-                        fromBlock: startBlock,
-                        toBlock: endBlock
-                    });
+                    // Get Khanate data for this chunk
+                    const {
+                        addresses,
+                        names,
+                        levels,
+                        archerCounts,
+                        cavalryCounts
+                    } = await this.contract.methods.getKhanatesByRange(start, end).call();
                     
-                    // Process events from this chunk
-                    for (const event of events) {
-                        const owner = event.returnValues.owner;
-                        try {
-                            const khanateInfo = await this.contract.methods.getKhanateStats(owner).call();
-                            if (khanateInfo.name) {
-                                khanates.set(owner, khanateInfo);
-                            }
-                        } catch (error) {
-                            console.log(`Skipping inactive Khanate for ${owner}`);
-                        }
+                    // Process the chunk data
+                    for (let i = 0; i < addresses.length; i++) {
+                        const khanateInfo = {
+                            name: names[i],
+                            level: levels[i],
+                            archers: archerCounts[i],
+                            cavalry: cavalryCounts[i]
+                        };
+                        khanates.set(addresses[i], khanateInfo);
                     }
                     
-                    // Add a small delay between chunks to avoid rate limiting
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    // Small delay between chunks
+                    await new Promise(resolve => setTimeout(resolve, 50));
                     
                 } catch (error) {
-                    console.warn(`Error fetching events for blocks ${startBlock}-${endBlock}:`, error);
-                    // Add a longer delay if we hit rate limiting
-                    if (error.message.includes('limit exceeded')) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
+                    console.warn(`Error fetching Khanates for range ${start}-${end}:`, error);
+                    // Add a small delay if we hit an error
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
             }
         } catch (error) {
             console.error('Error in getAllKhanates:', error);
-            // Show a user-friendly notification
-            this.showNotification('⚠️ Network is busy. Please try again in a few moments.');
+            this.showNotification('⚠️ Error loading Khanates. Please try again.');
         }
         
         return khanates;
