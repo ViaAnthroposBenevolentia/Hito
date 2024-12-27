@@ -823,11 +823,22 @@ class KazakhKhanateGame {
         pathContainer.appendChild(path);
         movementsContainer.appendChild(pathContainer);
         
-        // Clean up after animation
-        setTimeout(() => {
+        // Clean up after animation and execute battle
+        setTimeout(async () => {
             pathContainer.remove();
             this.globalMovements.delete(movement.movementId);
             this.showBattleAnimation(movement.end.x, movement.end.y);
+            
+            // Get battle data from activeMovements
+            const battleData = this.activeMovements.get(movement.movementId);
+            if (battleData && battleData.battleId !== undefined) {
+                try {
+                    // Execute the battle
+                    await this.executeBattle(battleData.battleId);
+                } catch (error) {
+                    console.error('Error executing battle:', error);
+                }
+            }
         }, remaining);
     }
 
