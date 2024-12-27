@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0x333A4Ee8a52DA101B77742E51FB573f523a6Ac77';
+        this.contractAddress = '0xe9E88685cA987b83c82857649b07eb35a948B600';
         this.accounts = [];
         this.accountLocations = {};
         this.activeMovements = new Map();
@@ -107,10 +107,42 @@ class KazakhKhanateGame {
 
     async initialize() {
         try {
-            // Connect directly to Ganache
-            this.web3 = new Web3('http://127.0.0.1:7545');
-            this.accounts = await this.web3.eth.getAccounts();
-            console.log('📝 Available accounts:', this.accounts);
+            // Check if MetaMask is installed
+            if (!window.ethereum) {
+                throw new Error('MetaMask is not installed. Please install MetaMask to use this dApp.');
+            }
+
+            // Check if MetaMask is locked
+            const isLocked = !(await window.ethereum._metamask?.isUnlocked());
+            if (isLocked) {
+                throw new Error('Please unlock your MetaMask wallet to continue.');
+            }
+
+            try {
+                // Request account access
+                this.accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                if (!this.accounts || this.accounts.length === 0) {
+                    throw new Error('Please create an account in MetaMask to use this dApp.');
+                }
+            } catch (error) {
+                if (error.code === 4001) {
+                    throw new Error('Please connect your MetaMask wallet to continue. Click the MetaMask icon and connect your account.');
+                }
+                throw error;
+            }
+            
+            // Create Web3 instance using MetaMask's provider
+            this.web3 = new Web3(window.ethereum);
+            
+            // Check if we're on BSC Testnet
+            const chainId = await this.web3.eth.getChainId();
+            if (chainId !== 97) {
+                // Show network switch prompt
+                await this.switchToBSCTestnet();
+            }
+            
+            console.log('📝 Connected account:', this.accounts[0]);
             
             if (this.accounts.length > 0) {
                 await this.loadContract();
@@ -128,12 +160,38 @@ class KazakhKhanateGame {
                 } else {
                     await this.initializeWithAccount(this.account);
                 }
-            } else {
-                this.showNotification('❌ No accounts found in Ganache');
             }
+
+            // Listen for account changes
+            window.ethereum.on('accountsChanged', (accounts) => {
+                if (accounts.length === 0) {
+                    // User disconnected all accounts
+                    this.showNotification('❌ Please connect your MetaMask wallet to continue');
+                }
+                window.location.reload();
+            });
+
+            // Listen for chain changes
+            window.ethereum.on('chainChanged', (chainId) => {
+                window.location.reload();
+            });
+
         } catch (error) {
             console.error('🐞 Initialization error:', error);
-            this.showNotification('❌ Failed to connect to Ganache. Make sure it is running on port 7545');
+            
+            // Show a more user-friendly error message
+            let errorMessage = error.message;
+            if (error.code === 4001) {
+                errorMessage = 'Please connect your MetaMask wallet to continue. Click the MetaMask icon and connect your account.';
+            }
+            
+            // Add a reconnect button to the notification
+            this.showNotification(`
+                ❌ ${errorMessage}
+                <button class="reconnect-button" onclick="window.game.reconnectWallet()">
+                    🔄 Reconnect Wallet
+                </button>
+            `, 10000); // Show for 10 seconds
         }
     }
 
@@ -1608,6 +1666,56 @@ class KazakhKhanateGame {
         });
         
         document.body.appendChild(detailsModal);
+    }
+
+    // Add new method to handle network switching
+    async switchToBSCTestnet() {
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x61' }], // 97 in hex
+            });
+        } catch (switchError) {
+            // This error code indicates that the chain has not been added to MetaMask
+            if (switchError.code === 4902) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: '0x61',
+                            chainName: 'BSC Testnet',
+                            nativeCurrency: {
+                                name: 'tBNB',
+                                symbol: 'tBNB',
+                                decimals: 18
+                            },
+                            rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545'],
+                            blockExplorerUrls: ['https://testnet.bscscan.com']
+                        }]
+                    });
+                } catch (addError) {
+                    throw new Error('Failed to add BSC Testnet to MetaMask');
+                }
+            } else {
+                throw new Error('Failed to switch to BSC Testnet');
+            }
+        }
+    }
+
+    // Add a reconnect method
+    async reconnectWallet() {
+        try {
+            await window.ethereum.request({
+                method: 'wallet_requestPermissions',
+                params: [{
+                    eth_accounts: {}
+                }]
+            });
+            window.location.reload();
+        } catch (error) {
+            console.error('Reconnection error:', error);
+            this.showNotification('❌ Failed to reconnect wallet. Please try again.');
+        }
     }
 }
 
