@@ -553,82 +553,20 @@ section {
 .map-marker-container {
     position: absolute;
     transform: translate(-50%, -50%);
-    z-index: 10;
-    transition: all 0.3s ease;
+    text-align: center;
+    pointer-events: auto;
 }
 
 .map-marker {
-    width: 24px;
-    height: 24px;
+    position: relative;
+    width: 20px;
+    height: 20px;
+    background-color: var(--accent-color);
+    border: 2px solid var(--primary-color);
     border-radius: 50%;
-    border: 2px solid #fff;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    margin: 0 auto 5px;
+    cursor: pointer;
     transition: all 0.3s ease;
-}
-
-.map-marker.claimed {
-    animation: pulse 2s infinite;
-}
-
-.map-marker.unclaimed {
-    opacity: 0.7;
-}
-
-.map-marker.unclaimed:hover {
-    opacity: 1;
-    transform: scale(1.1);
-}
-
-.territory-name-label,
-.khanate-name-label {
-    position: absolute;
-    top: -40px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.map-marker-container:hover .territory-name-label,
-.map-marker-container:hover .khanate-name-label {
-    opacity: 1;
-}
-
-.tooltip {
-    position: fixed;
-    background: rgba(0, 0, 0, 0.9);
-    color: white;
-    padding: 10px;
-    border-radius: 4px;
-    font-size: 14px;
-    z-index: 1000;
-    max-width: 250px;
-    line-height: 1.4;
-}
-
-.tooltip .click-hint {
-    color: #4CAF50;
-    font-weight: bold;
-    display: block;
-    margin-top: 5px;
-}
-
-@keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
-    }
-    70% {
-        box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
-    }
 }
 
 .map-marker:hover {
