@@ -236,53 +236,29 @@ class KazakhKhanateGame {
             console.log('Fetching active Khanates...');
             // Get total number of active Khanates
             const activeKhanates = await this.contract.methods.getActiveKhanates().call();
-            const totalKhanates = activeKhanates.length;
+            console.log('Raw active Khanates:', activeKhanates);
             
-            console.log('Total active Khanates:', totalKhanates);
-            console.log('Active Khanate addresses:', activeKhanates);
-            
-            if (totalKhanates === 0) {
-                console.log('No active Khanates found');
-                return khanates;
-            }
-            
-            // Fetch Khanates in chunks of 20
-            const chunkSize = 20;
-            for (let start = 0; start < totalKhanates; start += chunkSize) {
-                const end = Math.min(start + chunkSize - 1, totalKhanates - 1);
-                
-                console.log(`Fetching Khanates chunk ${start}-${end}...`);
+            // Process each Khanate address
+            for (const address of activeKhanates) {
                 try {
-                    // Get Khanate data for this chunk
-                    const {
-                        addresses,
-                        names,
-                        levels,
-                        archerCounts,
-                        cavalryCounts
-                    } = await this.contract.methods.getKhanatesByRange(start, end).call();
-                    
-                    console.log('Chunk data:', { addresses, names, levels, archerCounts, cavalryCounts });
-                    
-                    // Process the chunk data
-                    for (let i = 0; i < addresses.length; i++) {
-                        const khanateInfo = {
-                            name: names[i],
-                            level: levels[i],
-                            archers: archerCounts[i],
-                            cavalry: cavalryCounts[i]
-                        };
-                        khanates.set(addresses[i], khanateInfo);
-                        console.log(`Added Khanate: ${addresses[i]} - ${names[i]}`);
+                    const khanateInfo = await this.contract.methods.getKhanateStats(address).call();
+                    if (khanateInfo && khanateInfo.name) {
+                        console.log(`Found Khanate: ${address} - ${khanateInfo.name}`);
+                        khanates.set(address.toLowerCase(), khanateInfo);
+                        
+                        // Ensure we have a position for this Khanate
+                        if (!this.accountLocations[address.toLowerCase()]) {
+                            // Assign a random position if none exists
+                            const randomLocation = this.availableLocations[Math.floor(Math.random() * this.availableLocations.length)];
+                            this.accountLocations[address.toLowerCase()] = {
+                                x: randomLocation.x,
+                                y: randomLocation.y
+                            };
+                            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+                        }
                     }
-                    
-                    // Small delay between chunks
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                    
                 } catch (error) {
-                    console.error(`Error fetching Khanates for range ${start}-${end}:`, error);
-                    // Add a small delay if we hit an error
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    console.error(`Error fetching Khanate info for ${address}:`, error);
                 }
             }
             
@@ -450,7 +426,22 @@ class KazakhKhanateGame {
     }
 
     getAccountPosition(account) {
-        return this.accountLocations[account] || { x: 50, y: 50 }; // Fallback position
+        // Ensure account is lowercase for consistent comparison
+        const normalizedAccount = account.toLowerCase();
+        let position = this.accountLocations[normalizedAccount];
+        
+        // If no position exists, create one
+        if (!position) {
+            const randomLocation = this.availableLocations[Math.floor(Math.random() * this.availableLocations.length)];
+            position = {
+                x: randomLocation.x,
+                y: randomLocation.y
+            };
+            this.accountLocations[normalizedAccount] = position;
+            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+        }
+        
+        return position;
     }
 
     showTooltip(event, account) {
@@ -692,7 +683,7 @@ class KazakhKhanateGame {
             await this.contract.methods.purchaseTroops(archers, cavalry)
                 .send({ from: this.account, value: totalCost });
             
-            this.showNotification('✅ Troops purchased successfully!');
+            this.showNotification(' Troops purchased successfully!');
             await this.checkKhanateStatus();
             await this.updateBalance();
         } catch (error) {
@@ -842,8 +833,24 @@ class KazakhKhanateGame {
             }
 
             // Calculate distance and travel time
-            const sourcePos = this.accountLocations[this.account];
-            const targetPos = this.accountLocations[opponent];
+            const sourcePos = this.getAccountPosition(this.account);
+            const targetPos = this.getAccountPosition(opponent);
+            
+            // Verify positions exist
+            if (!sourcePos || !targetPos || !sourcePos.x || !sourcePos.y || !targetPos.x || !targetPos.y) {
+                // If positions are missing, assign default positions
+                if (!this.accountLocations[this.account]) {
+                    this.accountLocations[this.account] = { x: 25, y: 30 }; // Default position for attacker
+                }
+                if (!this.accountLocations[opponent]) {
+                    this.accountLocations[opponent] = { x: 75, y: 70 }; // Default position for defender
+                }
+                localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+            }
+            
+            // Get positions again after potential defaults
+            const finalSourcePos = this.getAccountPosition(this.account);
+            const finalTargetPos = this.getAccountPosition(opponent);
             
             // Initiate battle on blockchain first to get the travel time
             console.log('Initiating battle transaction...');
@@ -862,7 +869,7 @@ class KazakhKhanateGame {
             
             // Create troop movement animation with blockchain travel time
             const movementId = Date.now();
-            this.createTroopMovement(sourcePos, targetPos, travelTime, movementId);
+            this.createTroopMovement(finalSourcePos, finalTargetPos, travelTime, movementId);
             
             // Store battle data
             const battleData = {
@@ -909,6 +916,12 @@ class KazakhKhanateGame {
     }
 
     createTroopMovement(start, end, duration, movementId) {
+        // Verify start and end positions
+        if (!start || !end || !start.x || !start.y || !end.x || !end.y) {
+            console.error('Invalid positions for troop movement:', { start, end });
+            return;
+        }
+
         // Store movement globally
         const movement = {
             start,
@@ -1494,7 +1507,7 @@ class KazakhKhanateGame {
                 tips.push("💪 Overwhelming force! Expect minimal losses.");
             }
         } else {
-            tips.push("���️ This is an even match. Prepare for some losses.");
+            tips.push("️ This is an even match. Prepare for some losses.");
         }
         
         return tips.map(tip => `<div class="battle-tip">${tip}</div>`).join('');
@@ -1536,31 +1549,7 @@ class KazakhKhanateGame {
 
     async showBattleMap() {
         try {
-            // Create or get battle modal
-            let battleModal = document.getElementById('battle-modal');
-            if (!battleModal) {
-                battleModal = document.createElement('div');
-                battleModal.id = 'battle-modal';
-                battleModal.className = 'modal';
-                battleModal.innerHTML = `
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h2>Choose Opponent</h2>
-                            <button id="cancel-battle" class="close-button">×</button>
-                        </div>
-                        <div id="battle-message" class="battle-message"></div>
-                        <div id="battle-markers" class="battle-markers"></div>
-                        <div id="opponent-list"></div>
-                    </div>
-                `;
-                document.body.appendChild(battleModal);
-                
-                // Add event listener for close button
-                battleModal.querySelector('#cancel-battle').addEventListener('click', () => {
-                    battleModal.classList.add('hidden');
-                });
-            }
-            
+            const battleModal = document.getElementById('battle-modal');
             battleModal.classList.remove('hidden');
             
             // Clear existing markers
@@ -1582,15 +1571,20 @@ class KazakhKhanateGame {
             const opponents = Array.from(allKhanates.entries())
                 .filter(([address]) => address.toLowerCase() !== this.account.toLowerCase());
             
+            console.log('Current account:', this.account);
+            console.log('Available opponents:', opponents);
+            
             const battleMessage = battleModal.querySelector('#battle-message');
             if (opponents.length === 0) {
                 battleMessage.textContent = 'No other players in the game yet. You are the first Khan!';
             } else {
-                battleMessage.textContent = 'Click on a Khanate to view battle details:';
+                battleMessage.textContent = `Found ${opponents.length} opponent(s). Click on a Khanate to view battle details:`;
             }
             
             // Show current player's Khanate (in green)
             const currentPosition = this.getAccountPosition(this.account);
+            console.log('Current player position:', currentPosition);
+            
             const currentMarker = document.createElement('div');
             currentMarker.className = 'map-marker-container';
             currentMarker.style.left = `${currentPosition.x}%`;
@@ -1609,7 +1603,9 @@ class KazakhKhanateGame {
             
             // Create markers for each opponent
             for (const [address, khanate] of opponents) {
+                console.log(`Creating marker for opponent: ${address} - ${khanate.name}`);
                 const position = this.getAccountPosition(address);
+                console.log('Opponent position:', position);
                 
                 // Create marker container
                 const markerContainer = document.createElement('div');
