@@ -208,33 +208,53 @@ class KazakhKhanateGame {
     async getAllKhanates() {
         const khanates = new Map();
         
-        // Get the latest block number
-        const latestBlock = await this.web3.eth.getBlockNumber();
-        
-        // Look for KhanateCreated events in the last 10000 blocks or from contract deployment
-        const fromBlock = Math.max(0, latestBlock - 10000);
-        
         try {
-            // Get all KhanateCreated events
-            const events = await this.contract.getPastEvents('KhanateCreated', {
-                fromBlock: fromBlock,
-                toBlock: 'latest'
-            });
+            // Get the latest block number
+            const latestBlock = await this.web3.eth.getBlockNumber();
             
-            // Get details for each Khanate
-            for (const event of events) {
-                const owner = event.returnValues.owner;
+            // Look for KhanateCreated events in chunks of 2000 blocks
+            const chunkSize = 2000;
+            const fromBlock = Math.max(0, latestBlock - 10000); // Still look at last 10000 blocks
+            
+            // Process blocks in chunks
+            for (let startBlock = fromBlock; startBlock < latestBlock; startBlock += chunkSize) {
+                const endBlock = Math.min(startBlock + chunkSize - 1, latestBlock);
+                
                 try {
-                    const khanateInfo = await this.contract.methods.getKhanateStats(owner).call();
-                    if (khanateInfo.name) {
-                        khanates.set(owner, khanateInfo);
+                    // Get events for this chunk
+                    const events = await this.contract.getPastEvents('KhanateCreated', {
+                        fromBlock: startBlock,
+                        toBlock: endBlock
+                    });
+                    
+                    // Process events from this chunk
+                    for (const event of events) {
+                        const owner = event.returnValues.owner;
+                        try {
+                            const khanateInfo = await this.contract.methods.getKhanateStats(owner).call();
+                            if (khanateInfo.name) {
+                                khanates.set(owner, khanateInfo);
+                            }
+                        } catch (error) {
+                            console.log(`Skipping inactive Khanate for ${owner}`);
+                        }
                     }
+                    
+                    // Add a small delay between chunks to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
                 } catch (error) {
-                    console.log(`Skipping inactive Khanate for ${owner}`);
+                    console.warn(`Error fetching events for blocks ${startBlock}-${endBlock}:`, error);
+                    // Add a longer delay if we hit rate limiting
+                    if (error.message.includes('limit exceeded')) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
                 }
             }
         } catch (error) {
-            console.error('Error fetching Khanates:', error);
+            console.error('Error in getAllKhanates:', error);
+            // Show a user-friendly notification
+            this.showNotification('⚠️ Network is busy. Please try again in a few moments.');
         }
         
         return khanates;
