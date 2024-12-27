@@ -1402,3 +1402,51 @@ section {
 .map-marker-container:hover .khanate-name-label {
     opacity: 1;
 }
+
+.incoming-attack-alert {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(255, 0, 0, 0.9);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    z-index: 1000;
+    animation: shake 0.5s ease-in-out infinite;
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+}
+
+.alert-content {
+    text-align: center;
+}
+
+.alert-content h3 {
+    margin: 0 0 10px 0;
+}
+
+.alert-content p {
+    margin: 5px 0;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+.incoming-attack-alert .view-map-button {
+    margin-top: 10px;
+    background: white;
+    color: red;
+    border: none;
+    padding: 5px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.incoming-attack-alert .view-map-button:hover {
+    background: #ff9999;
+    color: white;
+}

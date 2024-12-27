@@ -1925,9 +1925,24 @@ class KazakhKhanateGame {
                 resolved: false
             };
             
-            // Add to active battles if involving current account
+            // Add to active battles if current account is attacker OR defender
             if (battle.attacker.toLowerCase() === this.account.toLowerCase() || 
                 battle.defender.toLowerCase() === this.account.toLowerCase()) {
+                
+                // Get positions for both parties
+                const attackerPos = await this.getAccountPosition(battle.attacker);
+                const defenderPos = await this.getAccountPosition(battle.defender);
+                
+                // Create movement animation for both attacker and defender views
+                const movementId = Date.now();
+                this.createTroopMovement(attackerPos, defenderPos, battle.travelTime * 1000, movementId);
+                
+                // If current user is defender, show incoming attack notification
+                if (battle.defender.toLowerCase() === this.account.toLowerCase()) {
+                    const attackerInfo = await this.contract.methods.getKhanateStats(battle.attacker).call();
+                    this.showIncomingAttackAlert(attackerInfo.name, battle.travelTime);
+                }
+                
                 this.activeBattles.push(battle);
                 localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
                 await this.refreshActiveBattles();
@@ -1947,6 +1962,27 @@ class KazakhKhanateGame {
             localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
             await this.refreshActiveBattles();
         });
+    }
+
+    // Add new method to show incoming attack alert
+    showIncomingAttackAlert(attackerName, travelTime) {
+        const notification = document.createElement('div');
+        notification.className = 'incoming-attack-alert';
+        notification.innerHTML = `
+            <div class="alert-content">
+                <h3>⚠️ Incoming Attack!</h3>
+                <p>${attackerName}'s troops are marching towards your Khanate!</p>
+                <p>Estimated arrival: ${Math.ceil(travelTime)} seconds</p>
+                <button class="view-map-button" onclick="window.game.viewBattleOnMap()">View on Map</button>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Remove notification after battle starts
+        setTimeout(() => {
+            notification.remove();
+        }, travelTime * 1000);
     }
 }
 
