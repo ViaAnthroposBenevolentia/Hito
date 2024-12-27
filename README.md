@@ -30,14 +30,19 @@ npm install
 ```
 
 3. Start Ganache:
-- Open Ganache
-- Create a new workspace
-- Configure the workspace to use port 7545
+```bash
+npm install -g ganache
+npx ganache --port 7545
+```
 
-4. Deploy the smart contract:
+4. Deploy the smart contract to Ganache for testing:
 ```bash
 npx hardhat compile
 npx hardhat run scripts/deploy.js --network ganache
+```
+Or to deploy to Binance Smart Chain Testnet:
+```bash
+npx hardhat run scripts/deploy.js --network bscTestnet
 ```
 
 5. Update the contract address:
@@ -46,8 +51,10 @@ npx hardhat run scripts/deploy.js --network ganache
 
 6. Add images:
 - Place Batyr images in `images/batyrs/` (batyr1.png to batyr5.png)
-- Place troop images in `images/troops/` (archer.png, cavalry.png)
+- Place troop images in `images/troops/` (archer.png, cavalry.png, troops.png)
 - Place flag image in `images/flags/` (kazakhstan_flag.png)
+- Place map image in `images/map/` (kazakhstan_map.png)
+- Place lucky box animation in `images/` (lucky_box.gif)
 
 7. Start a local web server:
 ```bash
@@ -57,30 +64,6 @@ npx http-server
 8. Open the game:
 - Navigate to `http://localhost:8080` in your browser
 - Start playing!
-
-## Game Mechanics
-
-### Troops
-- Archers: Cost 0.01 ETH each, medium damage
-- Cavalry: Cost 0.02 ETH each, high damage
-
-### Batyrs
-1. Kabanbay Batyr: Very high damage (30 cavalry equivalent)
-2. Kobylandy Batyr: High speed and defense (25 cavalry equivalent)
-3. Abylai Khan: Leadership bonus (+10% troop effectiveness)
-4. Raimgazy Batyr: Cavalry counter specialist
-5. Srym Datov: Archer specialist
-
-### Lucky Boxes
-- Cost: 0.1 ETH
-- 10% chance to receive a Batyr
-- Probability drops to 0.1% if you already own a Batyr
-
-### Battles
-- Success depends on:
-  - Troop numbers and types
-  - Batyr bonuses
-  - Strategic combinations
 
 ## Development
 
