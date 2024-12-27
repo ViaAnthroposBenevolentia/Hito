@@ -21,6 +21,8 @@ contract KazakhKhanate is ReentrancyGuard {
         uint256 losses;
         uint256 successfulDefenses;
         bool initialized;
+        uint256 locationX;
+        uint256 locationY;
     }
 
     struct BatyrStats {
@@ -120,9 +122,10 @@ contract KazakhKhanate is ReentrancyGuard {
         _;
     }
 
-    function createKhanate(string memory name) external {
+    function createKhanate(string memory name, uint256 locationX, uint256 locationY) external {
         require(!khanates[msg.sender].initialized, "Khanate already exists");
         require(bytes(name).length > 0, "Name cannot be empty");
+        require(locationX <= 100 && locationY <= 100, "Invalid location coordinates");
 
         khanates[msg.sender] = Khanate({
             name: name,
@@ -133,7 +136,9 @@ contract KazakhKhanate is ReentrancyGuard {
             wins: 0,
             losses: 0,
             successfulDefenses: 0,
-            initialized: true
+            initialized: true,
+            locationX: locationX,
+            locationY: locationY
         });
 
         // Add to active Khanates array
@@ -355,11 +360,13 @@ contract KazakhKhanate is ReentrancyGuard {
         uint256 cavalry,
         uint256 experience,
         uint256 wins,
-        uint256 losses
+        uint256 losses,
+        uint256 locationX,
+        uint256 locationY
     ) {
         require(khanates[player].initialized, "Khanate not initialized");
         Khanate memory k = khanates[player];
-        return (k.name, k.level, k.archers, k.cavalry, k.experience, k.wins, k.losses);
+        return (k.name, k.level, k.archers, k.cavalry, k.experience, k.wins, k.losses, k.locationX, k.locationY);
     }
 
     function getBatyrStats(uint256 batyrId) external view returns (

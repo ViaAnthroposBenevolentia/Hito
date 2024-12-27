@@ -3,19 +3,12 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0xAdBBEBF95A7c6065FA571cC35CC61F6f0F070e8f';
+        this.contractAddress = '0x11E64FE401bD7cE975cbF56e5EeA8152d0254062';
         this.accounts = [];
-        this.accountLocations = {};
         this.activeMovements = new Map();
         this.achievements = new Map();
         this.globalMovements = new Map();
         this.lastBattleCheck = 0;
-        
-        // Load saved locations from localStorage
-        const savedLocations = localStorage.getItem('khanateLocations');
-        if (savedLocations) {
-            this.accountLocations = JSON.parse(savedLocations);
-        }
         
         // Define available locations with names and coordinates
         this.availableLocations = [
@@ -245,17 +238,6 @@ class KazakhKhanateGame {
                     if (khanateInfo && khanateInfo.name) {
                         console.log(`Found Khanate: ${address} - ${khanateInfo.name}`);
                         khanates.set(address.toLowerCase(), khanateInfo);
-                        
-                        // Ensure we have a position for this Khanate
-                        if (!this.accountLocations[address.toLowerCase()]) {
-                            // Assign a random position if none exists
-                            const randomLocation = this.availableLocations[Math.floor(Math.random() * this.availableLocations.length)];
-                            this.accountLocations[address.toLowerCase()] = {
-                                x: randomLocation.x,
-                                y: randomLocation.y
-                            };
-                            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
-                        }
                     }
                 } catch (error) {
                     console.error(`Error fetching Khanate info for ${address}:`, error);
@@ -270,6 +252,130 @@ class KazakhKhanateGame {
         }
         
         return khanates;
+    }
+
+    async getAccountPosition(account) {
+        // Ensure account is lowercase for consistent comparison
+        const normalizedAccount = account.toLowerCase();
+        
+        // Get position from blockchain
+        try {
+            const khanateInfo = await this.contract.methods.getKhanateStats(normalizedAccount).call();
+            return {
+                x: parseInt(khanateInfo.locationX),
+                y: parseInt(khanateInfo.locationY)
+            };
+        } catch (error) {
+            console.error('Error getting account position:', error);
+            // Return default position if there's an error
+            return { x: 50, y: 50 };
+        }
+    }
+
+    async createKhanate(name, location) {
+        try {
+            if (!this.contract || !this.contract.methods) {
+                throw new Error('Contract not properly initialized');
+            }
+            
+            console.log('📝 Creating Khanate with name:', name);
+            console.log('📝 Using account:', this.account);
+            
+            // First check if a Khanate already exists
+            try {
+                const existingKhanate = await this.contract.methods.getKhanateStats(this.account).call();
+                if (existingKhanate.name) {
+                    throw new Error('Khanate already exists');
+                }
+            } catch (error) {
+                if (!error.message.includes('Khanate not initialized')) {
+                    throw error;
+                }
+            }
+            
+            // Estimate gas with a larger limit
+            const gasEstimate = await this.contract.methods.createKhanate(name, location.x, location.y)
+                .estimateGas({ 
+                    from: this.account,
+                    gas: 500000 // Start with a higher gas limit for estimation
+                });
+            
+            console.log('⛽ Estimated gas:', gasEstimate);
+            
+            // Send transaction with increased gas limit
+            const result = await this.contract.methods.createKhanate(name, location.x, location.y)
+                .send({ 
+                    from: this.account,
+                    gas: Math.floor(gasEstimate * 1.5) // 50% buffer
+                });
+            
+            console.log('✅ Khanate creation transaction:', result);
+            this.showNotification('✅ Khanate created successfully!');
+            
+            // Hide khanate creation section
+            document.getElementById('khanate-creation').classList.add('hidden');
+            
+            // Initialize game interface after successful creation
+            await this.initializeWithAccount(this.account);
+            
+            // Clear the input field
+            document.getElementById('khanate-name').value = '';
+            
+            // Refresh the UI components
+            await this.checkKhanateStatus();
+            await this.updateBalance();
+            await this.loadAchievements();
+            await this.updateBatyrList();
+            
+        } catch (error) {
+            console.error('🐞 Khanate creation error:', error);
+            if (error.message.includes('Khanate already exists')) {
+                this.showNotification('❌ You already have a Khanate!');
+            } else {
+                this.showNotification('❌ Failed to create Khanate: ' + error.message);
+            }
+        }
+    }
+
+    showKhanateCreationModal(location) {
+        // Create modal for Khanate creation
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h2>Create Your Khanate in ${location.name}</h2>
+                <div class="modal-body">
+                    <input type="text" id="new-khanate-name" placeholder="Enter Khanate name" class="input-field">
+                    <div class="button-group">
+                        <button id="confirm-khanate" class="action-button">Create Khanate</button>
+                        <button id="cancel-khanate" class="cancel-button">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Add event listeners
+        document.getElementById('confirm-khanate').addEventListener('click', async () => {
+            const name = document.getElementById('new-khanate-name').value;
+            if (name) {
+                await this.createKhanate(name, location);
+                modal.remove();
+            } else {
+                this.showNotification('❌ Please enter a Khanate name');
+            }
+        });
+
+        document.getElementById('cancel-khanate').addEventListener('click', () => {
+            modal.remove();
+        });
+
+        // Close on outside click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
     }
 
     async showAccountSelection() {
@@ -379,69 +485,6 @@ class KazakhKhanateGame {
             console.error('Error setting up location selection:', error);
             this.showNotification('❌ Error loading available locations');
         }
-    }
-
-    showKhanateCreationModal(location) {
-        // Create modal for Khanate creation
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <h2>Create Your Khanate in ${location.name}</h2>
-                <div class="modal-body">
-                    <input type="text" id="new-khanate-name" placeholder="Enter Khanate name" class="input-field">
-                    <div class="button-group">
-                        <button id="confirm-khanate" class="action-button">Create Khanate</button>
-                        <button id="cancel-khanate" class="cancel-button">Cancel</button>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-
-        // Add event listeners
-        document.getElementById('confirm-khanate').addEventListener('click', async () => {
-            const name = document.getElementById('new-khanate-name').value;
-            if (name) {
-                this.accountLocations[this.account] = { x: location.x, y: location.y };
-                // Save locations to localStorage
-                localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
-                await this.createKhanate(name);
-                modal.remove();
-            } else {
-                this.showNotification('❌ Please enter a Khanate name');
-            }
-        });
-
-        document.getElementById('cancel-khanate').addEventListener('click', () => {
-            modal.remove();
-        });
-
-        // Close on outside click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.remove();
-            }
-        });
-    }
-
-    getAccountPosition(account) {
-        // Ensure account is lowercase for consistent comparison
-        const normalizedAccount = account.toLowerCase();
-        let position = this.accountLocations[normalizedAccount];
-        
-        // If no position exists, create one
-        if (!position) {
-            const randomLocation = this.availableLocations[Math.floor(Math.random() * this.availableLocations.length)];
-            position = {
-                x: randomLocation.x,
-                y: randomLocation.y
-            };
-            this.accountLocations[normalizedAccount] = position;
-            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
-        }
-        
-        return position;
     }
 
     showTooltip(event, account) {
@@ -607,71 +650,6 @@ class KazakhKhanateGame {
         document.getElementById('actions').classList.add('hidden');
         document.getElementById('battle-modal').classList.add('hidden');
         document.getElementById('purchase-modal').classList.add('hidden');
-    }
-
-    async createKhanate(name) {
-        try {
-            if (!this.contract || !this.contract.methods) {
-                throw new Error('Contract not properly initialized');
-            }
-            
-            console.log('📝 Creating Khanate with name:', name);
-            console.log('📝 Using account:', this.account);
-            
-            // First check if a Khanate already exists
-            try {
-                const existingKhanate = await this.contract.methods.getKhanateStats(this.account).call();
-                if (existingKhanate.name) {
-                    throw new Error('Khanate already exists');
-                }
-            } catch (error) {
-                if (!error.message.includes('Khanate not initialized')) {
-                    throw error;
-                }
-            }
-            
-            // Estimate gas with a larger limit
-            const gasEstimate = await this.contract.methods.createKhanate(name)
-                .estimateGas({ 
-                    from: this.account,
-                    gas: 500000 // Start with a higher gas limit for estimation
-                });
-            
-            console.log('⛽ Estimated gas:', gasEstimate);
-            
-            // Send transaction with increased gas limit
-            const result = await this.contract.methods.createKhanate(name)
-                .send({ 
-                    from: this.account,
-                    gas: Math.floor(gasEstimate * 1.5) // 50% buffer
-                });
-            
-            console.log('✅ Khanate creation transaction:', result);
-            this.showNotification('✅ Khanate created successfully!');
-            
-            // Hide khanate creation section
-            document.getElementById('khanate-creation').classList.add('hidden');
-            
-            // Initialize game interface after successful creation
-            await this.initializeWithAccount(this.account);
-            
-            // Clear the input field
-            document.getElementById('khanate-name').value = '';
-            
-            // Refresh the UI components
-            await this.checkKhanateStatus();
-            await this.updateBalance();
-            await this.loadAchievements();
-            await this.updateBatyrList();
-            
-        } catch (error) {
-            console.error('🐞 Khanate creation error:', error);
-            if (error.message.includes('Khanate already exists')) {
-                this.showNotification('❌ You already have a Khanate!');
-            } else {
-                this.showNotification('❌ Failed to create Khanate: ' + error.message);
-            }
-        }
     }
 
     async purchaseTroops(archers, cavalry) {
@@ -1582,7 +1560,7 @@ class KazakhKhanateGame {
             }
             
             // Show current player's Khanate (in green)
-            const currentPosition = this.getAccountPosition(this.account);
+            const currentPosition = await this.getAccountPosition(this.account);
             console.log('Current player position:', currentPosition);
             
             const currentMarker = document.createElement('div');
@@ -1604,7 +1582,7 @@ class KazakhKhanateGame {
             // Create markers for each opponent
             for (const [address, khanate] of opponents) {
                 console.log(`Creating marker for opponent: ${address} - ${khanate.name}`);
-                const position = this.getAccountPosition(address);
+                const position = await this.getAccountPosition(address);
                 console.log('Opponent position:', position);
                 
                 // Create marker container
@@ -1615,7 +1593,7 @@ class KazakhKhanateGame {
                 
                 // Create marker
                 const marker = document.createElement('div');
-                marker.className = 'map-marker battle-marker';
+                marker.className = 'map-marker enemy';
                 
                 // Create name label
                 const nameLabel = document.createElement('div');
