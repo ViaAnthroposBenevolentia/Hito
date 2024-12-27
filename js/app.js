@@ -10,6 +10,21 @@ class KazakhKhanateGame {
         this.achievements = new Map();
         this.globalMovements = new Map();
         this.lastBattleCheck = 0;
+        
+        // Define available locations with names and coordinates
+        this.availableLocations = [
+            { name: "Aktobe Region", x: 25, y: 30 },
+            { name: "Kostanay Region", x: 45, y: 25 },
+            { name: "Pavlodar Region", x: 65, y: 35 },
+            { name: "Kyzylorda Region", x: 35, y: 45 },
+            { name: "Almaty Region", x: 55, y: 55 },
+            { name: "East Kazakhstan", x: 75, y: 45 },
+            { name: "Mangystau Region", x: 15, y: 55 },
+            { name: "North Kazakhstan", x: 85, y: 25 },
+            { name: "Shymkent Region", x: 45, y: 65 },
+            { name: "Turkistan Region", x: 25, y: 75 }
+        ];
+
         this.strategicQuotes = [
             {
                 text: "The supreme art of war is to subdue the enemy without fighting.",
@@ -286,6 +301,11 @@ class KazakhKhanateGame {
     }
 
     async showAccountSelection() {
+        if (!this.account) {
+            this.showNotification('❌ Please connect your MetaMask wallet first');
+            return;
+        }
+
         // Hide other sections
         document.getElementById('khanate-creation').classList.add('hidden');
         document.getElementById('khanate-info').classList.add('hidden');
@@ -299,69 +319,115 @@ class KazakhKhanateGame {
         // Clear existing markers
         document.getElementById('account-markers').innerHTML = '';
 
-        // Get all Khanates from the blockchain
-        const allKhanates = await this.getAllKhanates();
+        try {
+            // Get all active Khanates
+            const allKhanates = await this.getAllKhanates();
+            console.log('Existing Khanates:', allKhanates);
 
-        // Initialize map markers for each Khanate
-        let markerIndex = 0;
-        for (const [account, khanateInfo] of allKhanates) {
-            try {
-                const position = this.getAccountPosition(account, markerIndex++);
-                this.accountLocations[account] = position;
-
+            // Create markers for all available locations
+            this.availableLocations.forEach((location, index) => {
                 // Create marker container
                 const markerContainer = document.createElement('div');
                 markerContainer.className = 'map-marker-container';
-                markerContainer.style.left = `${position.x}%`;
-                markerContainer.style.top = `${position.y}%`;
+                markerContainer.style.left = `${location.x}%`;
+                markerContainer.style.top = `${location.y}%`;
+
+                // Find if this location is taken
+                const existingKhanate = Array.from(allKhanates.entries()).find(([_, khanate]) => 
+                    this.accountLocations[khanate.owner]?.x === location.x && 
+                    this.accountLocations[khanate.owner]?.y === location.y
+                );
 
                 // Create marker
                 const marker = document.createElement('div');
                 marker.className = 'map-marker';
-                if (account === this.account) {
-                    marker.classList.add('current');
+                
+                if (existingKhanate) {
+                    // Location is taken
+                    const [owner, khanate] = existingKhanate;
+                    marker.classList.add(owner === this.account ? 'current' : 'taken');
+                    markerContainer.title = `${khanate.name} (${location.name})`;
+                    
+                    // Create name label
+                    const nameLabel = document.createElement('div');
+                    nameLabel.className = 'khanate-name-label';
+                    nameLabel.textContent = khanate.name;
+                    markerContainer.appendChild(nameLabel);
+
+                    if (owner === this.account) {
+                        markerContainer.addEventListener('click', () => this.selectAccount(owner));
+                    }
+                } else {
+                    // Location is available
+                    marker.classList.add('available');
+                    markerContainer.title = `Available: ${location.name}`;
+                    
+                    // Create name label
+                    const nameLabel = document.createElement('div');
+                    nameLabel.className = 'khanate-name-label';
+                    nameLabel.textContent = location.name;
+                    markerContainer.appendChild(nameLabel);
+
+                    // Add click handler for creating new Khanate
+                    markerContainer.addEventListener('click', () => {
+                        this.showKhanateCreationModal(location);
+                    });
                 }
 
-                // Create name label
-                const nameLabel = document.createElement('div');
-                nameLabel.className = 'khanate-name-label';
-                nameLabel.textContent = khanateInfo.name;
-
-                // Add tooltip and click event
-                markerContainer.addEventListener('mouseover', (e) => this.showTooltip(e, account));
-                markerContainer.addEventListener('mouseout', () => this.hideTooltip());
-                if (this.accounts.includes(account)) {
-                    markerContainer.addEventListener('click', () => this.selectAccount(account));
-                }
-
-                // Assemble marker
                 markerContainer.appendChild(marker);
-                markerContainer.appendChild(nameLabel);
                 document.getElementById('account-markers').appendChild(markerContainer);
+            });
 
-            } catch (error) {
-                console.error(`Error creating marker for account ${account}:`, error);
-            }
+        } catch (error) {
+            console.error('Error setting up location selection:', error);
+            this.showNotification('❌ Error loading available locations');
         }
     }
 
-    getAccountPosition(account, index) {
-        // Define fixed positions for accounts on the map
-        const positions = [
-            { x: 25, y: 30 },  // Aktobe region
-            { x: 45, y: 25 },  // Kostanay region
-            { x: 65, y: 35 },  // Pavlodar region
-            { x: 35, y: 45 },  // Kyzylorda region
-            { x: 55, y: 55 },  // Almaty region
-            { x: 75, y: 45 },  // East Kazakhstan
-            { x: 15, y: 55 },  // Mangystau region
-            { x: 85, y: 25 },  // North Kazakhstan
-            { x: 45, y: 65 },  // Shymkent region
-            { x: 25, y: 75 }   // Turkistan region
-        ];
+    showKhanateCreationModal(location) {
+        // Create modal for Khanate creation
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h2>Create Your Khanate in ${location.name}</h2>
+                <div class="modal-body">
+                    <input type="text" id="new-khanate-name" placeholder="Enter Khanate name" class="input-field">
+                    <div class="button-group">
+                        <button id="confirm-khanate" class="action-button">Create Khanate</button>
+                        <button id="cancel-khanate" class="cancel-button">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
 
-        // Use modulo to cycle through positions if there are more accounts than positions
-        return positions[index % positions.length];
+        // Add event listeners
+        document.getElementById('confirm-khanate').addEventListener('click', async () => {
+            const name = document.getElementById('new-khanate-name').value;
+            if (name) {
+                this.accountLocations[this.account] = { x: location.x, y: location.y };
+                await this.createKhanate(name);
+                modal.remove();
+            } else {
+                this.showNotification('❌ Please enter a Khanate name');
+            }
+        });
+
+        document.getElementById('cancel-khanate').addEventListener('click', () => {
+            modal.remove();
+        });
+
+        // Close on outside click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+
+    getAccountPosition(account) {
+        return this.accountLocations[account] || { x: 50, y: 50 }; // Fallback position
     }
 
     showTooltip(event, account) {
