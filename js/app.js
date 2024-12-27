@@ -266,13 +266,24 @@ class KazakhKhanateGame {
         // Ensure account is lowercase for consistent comparison
         const normalizedAccount = account.toLowerCase();
         
-        // Get position from blockchain
+        // First check stored locations
+        if (this.accountLocations[normalizedAccount]) {
+            return this.accountLocations[normalizedAccount];
+        }
+        
+        // If no stored location, get from blockchain
         try {
             const khanateInfo = await this.contract.methods.getKhanateStats(normalizedAccount).call();
-            return {
+            const position = {
                 x: parseInt(khanateInfo.locationX),
                 y: parseInt(khanateInfo.locationY)
             };
+            
+            // Store the position for future use
+            this.accountLocations[normalizedAccount] = position;
+            localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+            
+            return position;
         } catch (error) {
             console.error('Error getting account position:', error);
             // Return default position if there's an error
@@ -821,25 +832,28 @@ class KazakhKhanateGame {
                 throw new Error('You have no troops to battle with');
             }
 
-            // Calculate distance and travel time
-            const sourcePos = this.getAccountPosition(this.account);
-            const targetPos = this.getAccountPosition(opponent);
+            // Get positions and wait for them to resolve
+            const sourcePos = await this.getAccountPosition(this.account);
+            const targetPos = await this.getAccountPosition(opponent);
             
             // Verify positions exist
             if (!sourcePos || !targetPos || !sourcePos.x || !sourcePos.y || !targetPos.x || !targetPos.y) {
-                // If positions are missing, assign default positions
-                if (!this.accountLocations[this.account]) {
-                    this.accountLocations[this.account] = { x: 25, y: 30 }; // Default position for attacker
+                console.log('Missing positions, using stored locations');
+                // If positions are missing, use stored locations
+                if (!this.accountLocations[this.account.toLowerCase()]) {
+                    this.accountLocations[this.account.toLowerCase()] = { x: 25, y: 30 }; // Default position for attacker
                 }
-                if (!this.accountLocations[opponent]) {
-                    this.accountLocations[opponent] = { x: 75, y: 70 }; // Default position for defender
+                if (!this.accountLocations[opponent.toLowerCase()]) {
+                    this.accountLocations[opponent.toLowerCase()] = { x: 75, y: 70 }; // Default position for defender
                 }
                 localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
             }
             
-            // Get positions again after potential defaults
-            const finalSourcePos = this.getAccountPosition(this.account);
-            const finalTargetPos = this.getAccountPosition(opponent);
+            // Get final positions
+            const finalSourcePos = this.accountLocations[this.account.toLowerCase()] || sourcePos;
+            const finalTargetPos = this.accountLocations[opponent.toLowerCase()] || targetPos;
+            
+            console.log('Battle positions:', { source: finalSourcePos, target: finalTargetPos });
             
             // Initiate battle on blockchain first to get the travel time
             console.log('Initiating battle transaction...');
