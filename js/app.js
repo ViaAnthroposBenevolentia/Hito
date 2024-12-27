@@ -227,6 +227,13 @@ class KazakhKhanateGame {
         await this.checkKhanateStatus();
         await this.loadAchievements();
         await this.refreshActiveBattles();
+        
+        // Add periodic battle checking
+        if (this.battleCheckInterval) {
+            clearInterval(this.battleCheckInterval);
+        }
+        this.battleCheckInterval = setInterval(() => this.checkActiveBattles(), 10000); // Check every 10 seconds
+        
         this.showNotification('✅ Connected to account successfully!');
     }
 
@@ -1003,14 +1010,29 @@ class KazakhKhanateGame {
             const battle = await this.contract.methods.activeBattles(battleId).call();
             console.log('Battle status:', battle);
             
+            if (!battle || battle.attacker === '0x0000000000000000000000000000000000000000') {
+                throw new Error('Invalid battle ID or battle does not exist');
+            }
+            
+            // Check timing
             const currentTime = Math.floor(Date.now() / 1000);
             const battleStartTime = parseInt(battle.startTime);
             const travelTime = parseInt(battle.travelTime);
             
+            console.log('Current time:', currentTime);
+            console.log('Battle start time:', battleStartTime);
+            console.log('Travel time:', travelTime);
+            console.log('Time until execution:', battleStartTime + travelTime - currentTime);
+            
             if (currentTime < battleStartTime + travelTime) {
-                throw new Error(`Troops still traveling. Please wait ${battleStartTime + travelTime - currentTime} seconds.`);
+                const remainingTime = battleStartTime + travelTime - currentTime;
+                throw new Error(`Troops still traveling. Please wait ${remainingTime} seconds.`);
             }
             
+            if (battle.resolved) {
+                throw new Error('Battle has already been resolved');
+            }
+
             // Execute battle with proper gas limit
             const result = await this.contract.methods.executeBattle(battleId)
                 .send({ 
@@ -1033,7 +1055,6 @@ class KazakhKhanateGame {
                     const revertReason = error.message.match(/reason string "(.+?)"/)[1];
                     errorMessage = revertReason;
                 } catch (e) {
-                    // If we can't extract the reason, use a more user-friendly message
                     errorMessage = 'Battle execution failed. The battle may have already been resolved or troops are still traveling.';
                 }
             }
@@ -1588,16 +1609,25 @@ class KazakhKhanateGame {
         }
 
         try {
-            // Get battle count from contract events instead
+            console.log('Checking active battles...');
             const activeBattles = [];
+            
+            // Get battle events from the last 1000 blocks
+            const latestBlock = await this.web3.eth.getBlockNumber();
+            const fromBlock = Math.max(0, latestBlock - 1000);
+            
             const events = await this.contract.getPastEvents('BattleInitiated', {
-                fromBlock: 0,
+                fromBlock: fromBlock,
                 toBlock: 'latest'
             });
+            
+            console.log('Found battle events:', events);
             
             for (const event of events) {
                 const battleId = event.returnValues.battleId;
                 const battle = await this.contract.methods.activeBattles(battleId).call();
+                
+                console.log(`Checking battle ${battleId}:`, battle);
                 
                 // Check if battle is valid, not resolved, and involves the current account
                 if (battle.attacker !== '0x0000000000000000000000000000000000000000' && // Valid battle
@@ -1610,27 +1640,25 @@ class KazakhKhanateGame {
                     const battleStartTime = parseInt(battle.startTime);
                     const travelTime = parseInt(battle.travelTime);
                     
-                    if (currentTime < battleStartTime + travelTime) {
-                        // Battle is still in progress
-                        activeBattles.push({...battle, battleId});
-                    } else {
+                    console.log('Battle timing:', {
+                        currentTime,
+                        battleStartTime,
+                        travelTime,
+                        timeUntilExecution: battleStartTime + travelTime - currentTime
+                    });
+                    
+                    if (currentTime >= battleStartTime + travelTime) {
+                        console.log('Battle ready for execution');
                         try {
-                            // Check if battle can be executed
-                            const canExecute = await this.contract.methods.activeBattles(battleId).call();
-                            if (!canExecute.resolved) {
-                                await this.contract.methods.executeBattle(battleId).send({
-                                    from: this.account,
-                                    gas: 300000
-                                });
-                            }
+                            await this.executeBattle(battleId);
                         } catch (error) {
-                            // Only log error if it's not about troops still traveling
-                            if (!error.message.includes('Troops still traveling')) {
-                                console.error('Error executing ready battle:', error);
-                            }
-                            // If battle can't be executed yet, add it to active battles
+                            console.error('Failed to execute ready battle:', error);
+                            // Add battle to active list if it couldn't be executed
                             activeBattles.push({...battle, battleId});
                         }
+                    } else {
+                        console.log('Battle still in progress');
+                        activeBattles.push({...battle, battleId});
                     }
                 }
             }
