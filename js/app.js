@@ -70,6 +70,17 @@ class KazakhKhanateGame {
         ];
         this.setupEventListeners();
         this.initialize();
+        
+        // Initialize active battles from localStorage
+        try {
+            this.activeBattles = JSON.parse(localStorage.getItem('activeBattles')) || [];
+        } catch (error) {
+            console.warn('Failed to load active battles from localStorage');
+            this.activeBattles = [];
+        }
+        
+        // Add battle event subscription
+        this.battleSubscription = null;
     }
 
     getRandomQuote(context = 'general') {
@@ -226,13 +237,14 @@ class KazakhKhanateGame {
         await this.updateBalance();
         await this.checkKhanateStatus();
         await this.loadAchievements();
+        await this.subscribeToBattleEvents();
         await this.refreshActiveBattles();
         
-        // Add periodic battle checking
+        // Check active battles every 30 seconds
         if (this.battleCheckInterval) {
             clearInterval(this.battleCheckInterval);
         }
-        this.battleCheckInterval = setInterval(() => this.checkActiveBattles(), 10000); // Check every 10 seconds
+        this.battleCheckInterval = setInterval(() => this.checkActiveBattles(), 30000);
         
         this.showNotification('✅ Connected to account successfully!');
     }
@@ -1603,72 +1615,37 @@ class KazakhKhanateGame {
     }
 
     async checkActiveBattles() {
-        // Cache check for 5 seconds to avoid too many calls
-        if (Date.now() - this.lastBattleCheck < 5000) {
-            return this.activeBattles || [];
-        }
-
         try {
-            console.log('Checking active battles...');
-            const activeBattles = [];
-            
-            // Get battle events from the last 1000 blocks
-            const latestBlock = await this.web3.eth.getBlockNumber();
-            const fromBlock = Math.max(0, latestBlock - 1000);
-            
-            const events = await this.contract.getPastEvents('BattleInitiated', {
-                fromBlock: fromBlock,
-                toBlock: 'latest'
+            // Filter out old battles
+            const currentTime = Math.floor(Date.now() / 1000);
+            this.activeBattles = this.activeBattles.filter(battle => {
+                const battleEndTime = parseInt(battle.startTime) + parseInt(battle.travelTime);
+                return currentTime < battleEndTime || !battle.resolved;
             });
             
-            console.log('Found battle events:', events);
-            
-            for (const event of events) {
-                const battleId = event.returnValues.battleId;
-                const battle = await this.contract.methods.activeBattles(battleId).call();
-                
-                console.log(`Checking battle ${battleId}:`, battle);
-                
-                // Check if battle is valid, not resolved, and involves the current account
-                if (battle.attacker !== '0x0000000000000000000000000000000000000000' && // Valid battle
-                    !battle.resolved && 
-                    (battle.attacker.toLowerCase() === this.account.toLowerCase() || 
-                     battle.defender.toLowerCase() === this.account.toLowerCase())) {
-                    
-                    // Check if battle should be completed based on time
+            // Check each unresolved battle
+            for (const battle of this.activeBattles) {
+                if (!battle.resolved) {
                     const currentTime = Math.floor(Date.now() / 1000);
-                    const battleStartTime = parseInt(battle.startTime);
-                    const travelTime = parseInt(battle.travelTime);
+                    const battleEndTime = parseInt(battle.startTime) + parseInt(battle.travelTime);
                     
-                    console.log('Battle timing:', {
-                        currentTime,
-                        battleStartTime,
-                        travelTime,
-                        timeUntilExecution: battleStartTime + travelTime - currentTime
-                    });
-                    
-                    if (currentTime >= battleStartTime + travelTime) {
-                        console.log('Battle ready for execution');
+                    if (currentTime >= battleEndTime) {
                         try {
-                            await this.executeBattle(battleId);
+                            await this.executeBattle(battle.battleId);
+                            battle.resolved = true;
                         } catch (error) {
-                            console.error('Failed to execute ready battle:', error);
-                            // Add battle to active list if it couldn't be executed
-                            activeBattles.push({...battle, battleId});
+                            console.error('Failed to execute battle:', error);
                         }
-                    } else {
-                        console.log('Battle still in progress');
-                        activeBattles.push({...battle, battleId});
                     }
                 }
             }
             
-            this.activeBattles = activeBattles;
-            this.lastBattleCheck = Date.now();
-            return activeBattles;
+            localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
+            return this.activeBattles;
+            
         } catch (error) {
             console.error('Error checking active battles:', error);
-            return [];
+            return this.activeBattles || [];
         }
     }
 
@@ -1907,6 +1884,50 @@ class KazakhKhanateGame {
             console.error('Reconnection error:', error);
             this.showNotification('❌ Failed to reconnect wallet. Please try again.');
         }
+    }
+
+    // Add new method to subscribe to battle events
+    async subscribeToBattleEvents() {
+        if (this.battleSubscription) {
+            this.battleSubscription.unsubscribe();
+        }
+
+        // Subscribe to BattleInitiated events
+        this.contract.events.BattleInitiated({
+            fromBlock: 'latest'
+        })
+        .on('data', async (event) => {
+            const battle = {
+                battleId: event.returnValues.battleId,
+                attacker: event.returnValues.attacker,
+                defender: event.returnValues.defender,
+                startTime: Math.floor(Date.now() / 1000),
+                travelTime: parseInt(event.returnValues.travelTime),
+                resolved: false
+            };
+            
+            // Add to active battles if involving current account
+            if (battle.attacker.toLowerCase() === this.account.toLowerCase() || 
+                battle.defender.toLowerCase() === this.account.toLowerCase()) {
+                this.activeBattles.push(battle);
+                localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
+                await this.refreshActiveBattles();
+            }
+        });
+
+        // Subscribe to BattleResult events
+        this.contract.events.BattleResult({
+            fromBlock: 'latest'
+        })
+        .on('data', async (event) => {
+            // Remove resolved battle from active battles
+            this.activeBattles = this.activeBattles.filter(battle => 
+                battle.attacker.toLowerCase() !== event.returnValues.winner.toLowerCase() &&
+                battle.attacker.toLowerCase() !== event.returnValues.loser.toLowerCase()
+            );
+            localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
+            await this.refreshActiveBattles();
+        });
     }
 }
 
