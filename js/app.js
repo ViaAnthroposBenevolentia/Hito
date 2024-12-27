@@ -10,6 +10,14 @@ class KazakhKhanateGame {
         this.globalMovements = new Map();
         this.lastBattleCheck = 0;
         
+        // Initialize accountLocations from localStorage or as empty object
+        try {
+            this.accountLocations = JSON.parse(localStorage.getItem('khanateLocations')) || {};
+        } catch (error) {
+            console.warn('Failed to load account locations from localStorage');
+            this.accountLocations = {};
+        }
+        
         // Define available locations with names and coordinates
         this.availableLocations = [
             { name: "Aktobe Region", x: 25, y: 30 },
@@ -427,16 +435,13 @@ class KazakhKhanateGame {
 
                 // Find if this location is taken
                 const existingKhanate = Array.from(allKhanates.entries()).find(([address]) => {
-                    // Check both stored location and current location
-                    const savedLocation = this.accountLocations[address];
-                    if (savedLocation && savedLocation.x === location.x && savedLocation.y === location.y) {
-                        return true;
-                    }
-                    // If no stored location, assign this location
-                    if (!this.accountLocations[address]) {
-                        this.accountLocations[address] = { x: location.x, y: location.y };
-                        localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
-                        return true;
+                    // Ensure address is lowercase for comparison
+                    const normalizedAddress = address.toLowerCase();
+                    
+                    // Check if location is already assigned
+                    if (this.accountLocations[normalizedAddress]) {
+                        const savedLocation = this.accountLocations[normalizedAddress];
+                        return savedLocation.x === location.x && savedLocation.y === location.y;
                     }
                     return false;
                 });
@@ -448,8 +453,14 @@ class KazakhKhanateGame {
                 if (existingKhanate) {
                     // Location is taken
                     const [owner, khanate] = existingKhanate;
-                    marker.classList.add(owner === this.account ? 'current' : 'taken');
+                    marker.classList.add(owner.toLowerCase() === this.account.toLowerCase() ? 'current' : 'taken');
                     markerContainer.title = `${khanate.name} (${location.name})`;
+                    
+                    // Store location for this Khanate if not already stored
+                    if (!this.accountLocations[owner.toLowerCase()]) {
+                        this.accountLocations[owner.toLowerCase()] = { x: location.x, y: location.y };
+                        localStorage.setItem('khanateLocations', JSON.stringify(this.accountLocations));
+                    }
                     
                     // Create name label
                     const nameLabel = document.createElement('div');
@@ -457,7 +468,7 @@ class KazakhKhanateGame {
                     nameLabel.textContent = khanate.name;
                     markerContainer.appendChild(nameLabel);
 
-                    if (owner === this.account) {
+                    if (owner.toLowerCase() === this.account.toLowerCase()) {
                         markerContainer.addEventListener('click', () => this.initializeWithAccount(owner));
                     }
                 } else {
