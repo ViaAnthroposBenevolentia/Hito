@@ -803,7 +803,7 @@ class KazakhKhanateGame {
         try {
             // Check if player is already in battle
             const activeBattles = await this.checkActiveBattles();
-            if (activeBattles.length > 0) {
+            if (activeBattles.some(b => !b.resolved && b.attacker.toLowerCase() === this.account.toLowerCase())) {
                 throw new Error('You already have an active battle. Wait for it to finish.');
             }
 
@@ -823,22 +823,18 @@ class KazakhKhanateGame {
 
             // Hide battle modal
             document.getElementById('battle-modal').classList.add('hidden');
-
+            
             // Verify opponent's Khanate exists and has troops
-            try {
-                const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
-                console.log('Opponent stats:', opponentStats);
-            } catch (error) {
-                throw new Error('Invalid opponent or opponent has no Khanate');
-            }
-
+            const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
+            console.log('Opponent stats:', opponentStats);
+            
             // Verify own troops
             const myStats = await this.contract.methods.getKhanateStats(this.account).call();
             if (myStats.archers === '0' && myStats.cavalry === '0') {
                 throw new Error('You have no troops to battle with');
             }
 
-            // Get positions from blockchain
+            // Get positions
             const sourcePos = await this.getAccountPosition(this.account);
             const targetPos = await this.getAccountPosition(opponent);
             
@@ -846,20 +842,28 @@ class KazakhKhanateGame {
                 throw new Error('Could not determine battle positions');
             }
 
+            // Estimate gas for battle initiation
+            const gasEstimate = await this.contract.methods.initiateBattle(opponent)
+                .estimateGas({ from: this.account });
+
             // Initiate battle transaction
             console.log('Initiating battle transaction...');
             const result = await this.contract.methods.initiateBattle(opponent)
                 .send({ 
                     from: this.account,
-                    gas: 300000
+                    gas: Math.floor(gasEstimate * 1.5) // Add 50% buffer
                 });
             
             console.log('Battle initiated successfully:', result);
             
-            // Get battle info
-            const battleId = result.events.BattleInitiated.returnValues.battleId;
-            const battle = await this.contract.methods.activeBattles(battleId).call();
-            const travelTime = parseInt(battle.travelTime) * 1000; // Convert to milliseconds
+            // Get battle info from event
+            const battleEvent = result.events.BattleInitiated;
+            if (!battleEvent) {
+                throw new Error('Battle initiation event not found');
+            }
+            
+            const battleId = battleEvent.returnValues.battleId;
+            const travelTime = parseInt(battleEvent.returnValues.travelTime) * 1000; // Convert to milliseconds
             
             // Create troop movement animation
             const movementId = Date.now();
@@ -867,17 +871,18 @@ class KazakhKhanateGame {
             
             // Store battle data
             const battleData = {
-                opponent,
-                startTime: Date.now(),
-                travelTime,
-                movementId,
                 battleId,
-                sourcePos,
-                targetPos
+                attacker: this.account,
+                defender: opponent,
+                startTime: Math.floor(Date.now() / 1000),
+                travelTime: travelTime / 1000, // Store in seconds
+                resolved: false,
+                movementId
             };
             
-            // Add to active movements
-            this.activeMovements.set(movementId, battleData);
+            // Add to active battles
+            this.activeBattles.push(battleData);
+            localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
             
             // Show notification
             this.showNotification(`
@@ -1018,44 +1023,44 @@ class KazakhKhanateGame {
         try {
             console.log('Executing battle with ID:', battleId);
             
-            // Check if battle exists and is ready
+            // Get battle info first
             const battle = await this.contract.methods.activeBattles(battleId).call();
-            console.log('Battle status:', battle);
-            
-            if (!battle || battle.attacker === '0x0000000000000000000000000000000000000000') {
-                throw new Error('Invalid battle ID or battle does not exist');
-            }
-            
-            // Check timing
-            const currentTime = Math.floor(Date.now() / 1000);
-            const battleStartTime = parseInt(battle.startTime);
-            const travelTime = parseInt(battle.travelTime);
-            
-            console.log('Current time:', currentTime);
-            console.log('Battle start time:', battleStartTime);
-            console.log('Travel time:', travelTime);
-            console.log('Time until execution:', battleStartTime + travelTime - currentTime);
-            
-            if (currentTime < battleStartTime + travelTime) {
-                const remainingTime = battleStartTime + travelTime - currentTime;
-                throw new Error(`Troops still traveling. Please wait ${remainingTime} seconds.`);
-            }
+            console.log('Battle state:', battle);
             
             if (battle.resolved) {
                 throw new Error('Battle has already been resolved');
             }
+            
+            // Calculate if enough time has passed
+            const currentTime = Math.floor(Date.now() / 1000);
+            const battleEndTime = parseInt(battle.startTime) + parseInt(battle.travelTime);
+            
+            if (currentTime < battleEndTime) {
+                const remainingTime = battleEndTime - currentTime;
+                throw new Error(`Troops still traveling. Please wait ${remainingTime} seconds.`);
+            }
 
-            // Execute battle with proper gas limit
+            // Execute battle with proper gas estimation
+            const gasEstimate = await this.contract.methods.executeBattle(battleId)
+                .estimateGas({ from: this.account });
+            
             const result = await this.contract.methods.executeBattle(battleId)
                 .send({ 
                     from: this.account,
-                    gas: 300000
+                    gas: Math.floor(gasEstimate * 1.5) // Add 50% buffer
                 });
             
             console.log('Battle execution result:', result);
             
             // Process battle results
             await this.processBattleResults(battleId, result);
+            
+            // Remove battle from active battles
+            this.activeBattles = this.activeBattles.filter(b => b.battleId !== battleId);
+            localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
+            
+            // Refresh UI
+            await this.refreshActiveBattles();
             
         } catch (error) {
             console.error('Battle execution error:', error);
@@ -1067,11 +1072,12 @@ class KazakhKhanateGame {
                     const revertReason = error.message.match(/reason string "(.+?)"/)[1];
                     errorMessage = revertReason;
                 } catch (e) {
-                    errorMessage = 'Battle execution failed. The battle may have already been resolved or troops are still traveling.';
+                    errorMessage = 'Battle execution failed. Please try again.';
                 }
             }
             
-            this.showNotification('❌ Battle failed: ' + errorMessage);
+            this.showNotification('❌ ' + errorMessage);
+            throw error; // Re-throw to be handled by caller
         }
     }
 
@@ -1616,35 +1622,48 @@ class KazakhKhanateGame {
 
     async checkActiveBattles() {
         try {
-            // Filter out old battles
             const currentTime = Math.floor(Date.now() / 1000);
-            this.activeBattles = this.activeBattles.filter(battle => {
-                const battleEndTime = parseInt(battle.startTime) + parseInt(battle.travelTime);
-                return currentTime < battleEndTime || !battle.resolved;
-            });
             
-            // Check each unresolved battle
+            // Get updated battle info for each active battle
+            const updatedBattles = [];
             for (const battle of this.activeBattles) {
-                if (!battle.resolved) {
-                    const currentTime = Math.floor(Date.now() / 1000);
+                try {
+                    // Get current battle state from contract
+                    const contractBattle = await this.contract.methods.activeBattles(battle.battleId).call();
+                    
+                    // Skip if battle is already resolved
+                    if (contractBattle.resolved) {
+                        continue;
+                    }
+                    
                     const battleEndTime = parseInt(battle.startTime) + parseInt(battle.travelTime);
                     
-                    if (currentTime >= battleEndTime) {
+                    // Check if battle can be executed
+                    if (currentTime >= battleEndTime && !battle.resolved) {
+                        console.log('Executing battle:', battle.battleId);
                         try {
                             await this.executeBattle(battle.battleId);
                             battle.resolved = true;
                         } catch (error) {
-                            console.error('Failed to execute battle:', error);
+                            console.error('Battle execution failed:', error);
+                            // Keep battle in list if execution failed
+                            updatedBattles.push(battle);
                         }
+                    } else if (currentTime < battleEndTime) {
+                        // Battle still in progress
+                        updatedBattles.push(battle);
                     }
+                } catch (error) {
+                    console.error('Error checking battle:', battle.battleId, error);
                 }
             }
             
-            localStorage.setItem('activeBattles', JSON.stringify(this.activeBattles));
-            return this.activeBattles;
+            this.activeBattles = updatedBattles;
+            localStorage.setItem('activeBattles', JSON.stringify(updatedBattles));
+            return updatedBattles;
             
         } catch (error) {
-            console.error('Error checking active battles:', error);
+            console.error('Error in checkActiveBattles:', error);
             return this.activeBattles || [];
         }
     }
