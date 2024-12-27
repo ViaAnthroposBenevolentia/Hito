@@ -137,7 +137,9 @@ class KazakhKhanateGame {
             
             // Check if we're on BSC Testnet
             const chainId = await this.web3.eth.getChainId();
+            console.log('Current Chain ID:', chainId);
             if (chainId !== 97) {
+                console.log('Wrong network, switching to BSC Testnet...');
                 // Show network switch prompt
                 await this.switchToBSCTestnet();
             }
@@ -149,9 +151,20 @@ class KazakhKhanateGame {
                 
                 // Verify contract
                 const code = await this.web3.eth.getCode(this.contractAddress);
+                console.log('Contract code length:', code.length);
                 if (code === '0x' || code === '0x0') {
                     throw new Error('No contract code at specified address');
                 }
+                
+                // Try to call a view function to verify contract interface
+                try {
+                    const activeKhanates = await this.contract.methods.getActiveKhanates().call();
+                    console.log('Active Khanates count:', activeKhanates.length);
+                } catch (error) {
+                    console.error('Contract interface verification failed:', error);
+                    throw new Error('Contract interface verification failed. Please check contract address.');
+                }
+                
                 console.log('✅ Contract verified at address:', this.contractAddress);
 
                 // Show account selection if no account is selected
@@ -209,11 +222,16 @@ class KazakhKhanateGame {
         const khanates = new Map();
         
         try {
+            console.log('Fetching active Khanates...');
             // Get total number of active Khanates
             const activeKhanates = await this.contract.methods.getActiveKhanates().call();
             const totalKhanates = activeKhanates.length;
             
+            console.log('Total active Khanates:', totalKhanates);
+            console.log('Active Khanate addresses:', activeKhanates);
+            
             if (totalKhanates === 0) {
+                console.log('No active Khanates found');
                 return khanates;
             }
             
@@ -222,6 +240,7 @@ class KazakhKhanateGame {
             for (let start = 0; start < totalKhanates; start += chunkSize) {
                 const end = Math.min(start + chunkSize - 1, totalKhanates - 1);
                 
+                console.log(`Fetching Khanates chunk ${start}-${end}...`);
                 try {
                     // Get Khanate data for this chunk
                     const {
@@ -232,6 +251,8 @@ class KazakhKhanateGame {
                         cavalryCounts
                     } = await this.contract.methods.getKhanatesByRange(start, end).call();
                     
+                    console.log('Chunk data:', { addresses, names, levels, archerCounts, cavalryCounts });
+                    
                     // Process the chunk data
                     for (let i = 0; i < addresses.length; i++) {
                         const khanateInfo = {
@@ -241,17 +262,21 @@ class KazakhKhanateGame {
                             cavalry: cavalryCounts[i]
                         };
                         khanates.set(addresses[i], khanateInfo);
+                        console.log(`Added Khanate: ${addresses[i]} - ${names[i]}`);
                     }
                     
                     // Small delay between chunks
                     await new Promise(resolve => setTimeout(resolve, 50));
                     
                 } catch (error) {
-                    console.warn(`Error fetching Khanates for range ${start}-${end}:`, error);
+                    console.error(`Error fetching Khanates for range ${start}-${end}:`, error);
                     // Add a small delay if we hit an error
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
             }
+            
+            console.log('Final Khanates map:', Object.fromEntries(khanates));
+            
         } catch (error) {
             console.error('Error in getAllKhanates:', error);
             this.showNotification('⚠️ Error loading Khanates. Please try again.');
@@ -421,11 +446,15 @@ class KazakhKhanateGame {
 
     async updateBalance() {
         try {
+            console.log('Fetching balance for account:', this.account);
             const balance = await this.web3.eth.getBalance(this.account);
+            console.log('Raw balance:', balance);
             const ethBalance = this.web3.utils.fromWei(balance, 'ether');
+            console.log('Converted balance:', ethBalance);
             document.getElementById('account-balance').textContent = parseFloat(ethBalance).toFixed(4);
         } catch (error) {
             console.error('🐞 Balance update error:', error);
+            this.showNotification('❌ Failed to update balance');
         }
     }
 
