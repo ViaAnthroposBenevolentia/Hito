@@ -587,39 +587,42 @@ class KazakhKhanateGame {
 
             // Verify opponent's Khanate exists and has troops
             try {
-                const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
+            const opponentStats = await this.contract.methods.getKhanateStats(opponent).call();
                 console.log('Opponent stats:', opponentStats);
             } catch (error) {
                 throw new Error('Invalid opponent or opponent has no Khanate');
             }
-
+            
             // Verify own troops
             const myStats = await this.contract.methods.getKhanateStats(this.account).call();
             if (myStats.archers === '0' && myStats.cavalry === '0') {
                 throw new Error('You have no troops to battle with');
             }
 
-            // Calculate distance and travel time
-            const sourcePos = this.accountLocations[this.account];
-            const targetPos = this.accountLocations[opponent];
-            
-            // Initiate battle on blockchain first to get the travel time
-            console.log('Initiating battle transaction...');
+            // Initiate battle transaction
+            console.log('🗡️ Sending battle transaction...');
             const result = await this.contract.methods.initiateBattle(opponent)
                 .send({ 
                     from: this.account,
                     gas: 300000
                 });
             
-            console.log('Battle initiated successfully:', result);
+            console.log('✅ Battle initiated:', result);
             
-            // Get battle info to get the actual travel time
-            const battleId = result.events.BattleInitiated.returnValues.battleId;
-            const battle = await this.contract.methods.activeBattles(battleId).call();
-            const travelTime = parseInt(battle.travelTime) * 1000; // Convert to milliseconds
+            // Get battle info from event
+            const battleEvent = result.events.BattleInitiated;
+            if (!battleEvent) {
+                throw new Error('Battle initiation failed - no event emitted');
+            }
+
+            const battleId = battleEvent.returnValues.battleId;
+            const travelTime = parseInt(battleEvent.returnValues.travelTime) * 1000; // Convert to milliseconds
             
-            // Create troop movement animation with blockchain travel time
+            // Create movement animation
+            const sourcePos = this.accountLocations[this.account];
+            const targetPos = this.accountLocations[opponent];
             const movementId = Date.now();
+            
             this.createTroopMovement(sourcePos, targetPos, travelTime, movementId);
             
             // Store battle data
@@ -631,19 +634,26 @@ class KazakhKhanateGame {
                 battleId
             };
             
-            // Add to active movements
             this.activeMovements.set(movementId, battleData);
             
-            // Schedule battle execution with a small delay after travel time
-            setTimeout(() => this.executeBattle(battleId), travelTime + 2000);
-                        
-                
-            // Show travel notification with View on Map button
+            // Show notification with progress
             this.showNotification(`
-                ⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds
+                ⚔️ Troops marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds
                 <button class="view-map-button" onclick="window.game.viewBattleOnMap()">View on Map</button>
             `, travelTime + 2000);
-            
+
+            // Set up battle execution
+            console.log('⏳ Setting up battle execution timer for battleId:', battleId);
+            setTimeout(async () => {
+                try {
+                    console.log('🗡️ Executing battle:', battleId);
+                    await this.executeBattle(battleId);
+                } catch (error) {
+                    console.error('Battle execution error:', error);
+                    this.showNotification('❌ Battle execution failed: ' + error.message);
+                }
+            }, travelTime + 2000);
+
         } catch (error) {
             console.error('🐞 Battle error:', error);
             this.showNotification('❌ Battle failed: ' + error.message);
@@ -794,48 +804,71 @@ class KazakhKhanateGame {
 
     async executeBattle(battleId) {
         try {
-            console.log('Executing battle with ID:', battleId);
+            console.log('⚔️ Executing battle:', battleId);
             
             // Check if battle exists and is ready
             const battle = await this.contract.methods.activeBattles(battleId).call();
-            console.log('Battle status:', battle);
+            console.log('📊 Battle status:', battle);
             
-            const currentTime = Math.floor(Date.now() / 1000);
-            const battleStartTime = parseInt(battle.startTime);
-            const travelTime = parseInt(battle.travelTime);
-            
-            if (currentTime < battleStartTime + travelTime) {
-                throw new Error(`Troops still traveling. Please wait ${battleStartTime + travelTime - currentTime} seconds.`);
+            if (battle.resolved) {
+                throw new Error('Battle already resolved');
             }
-            
-            // Execute battle with proper gas limit
+
+            // Execute battle
             const result = await this.contract.methods.executeBattle(battleId)
                 .send({ 
                     from: this.account,
                     gas: 300000
                 });
             
-            console.log('Battle execution result:', result);
-            
+            console.log('✅ Battle execution result:', result);
+
             // Process battle results
-            await this.processBattleResults(battleId, result);
-            
+            if (result.events.BattleResult) {
+                const { winner, loser, experienceGained } = result.events.BattleResult.returnValues;
+                const isWinner = winner.toLowerCase() === this.account.toLowerCase();
+                
+                // Get updated stats
+                const myStats = await this.contract.methods.getKhanateStats(this.account).call();
+                console.log('📊 Updated stats:', myStats);
+                
+                // Show battle outcome
+                if (isWinner) {
+                    this.showCelebration();
+                    this.showNotification(`🎉 Victory! Gained ${experienceGained} experience!`, 6000);
+                } else {
+                    this.showNotification(`💔 Defeat! Your troops suffered heavy losses.`, 6000);
+                }
+                
+                // Update UI
+                await this.checkKhanateStatus();
+                await this.updateBalance();
+                await this.loadAchievements();
+                
+                // Remove battle movement animation
+                const movementElement = document.querySelector(`[data-battle-id="${battleId}"]`);
+                if (movementElement) {
+                    movementElement.remove();
+                }
+            } else {
+                throw new Error('No battle result event found');
+            }
         } catch (error) {
-            console.error('Battle execution error:', error);
+            console.error('🐞 Battle execution error:', error);
             
-            // Extract the revert reason if available
+            // Extract revert reason if available
             let errorMessage = error.message;
             if (error.message.includes('execution reverted')) {
                 try {
                     const revertReason = error.message.match(/reason string "(.+?)"/)[1];
                     errorMessage = revertReason;
                 } catch (e) {
-                    // If we can't extract the reason, use a more user-friendly message
                     errorMessage = 'Battle execution failed. The battle may have already been resolved or troops are still traveling.';
                 }
             }
             
-            this.showNotification('❌ Battle failed: ' + errorMessage);
+            this.showNotification('❌ ' + errorMessage);
+            throw error;
         }
     }
 
@@ -1612,6 +1645,22 @@ class KazakhKhanateGame {
         });
         
         document.body.appendChild(detailsModal);
+    }
+
+    async checkBattleProgress(battleId) {
+        try {
+            const battle = await this.contract.methods.activeBattles(battleId).call();
+            const currentTime = Math.floor(Date.now() / 1000);
+            const battleStartTime = parseInt(battle.startTime);
+            const travelTime = parseInt(battle.travelTime);
+            
+            if (currentTime >= battleStartTime + travelTime && !battle.resolved) {
+                console.log('🗡️ Battle ready for execution:', battleId);
+                await this.executeBattle(battleId);
+            }
+        } catch (error) {
+            console.error('Battle progress check error:', error);
+        }
     }
 }
 
