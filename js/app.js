@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0x333A4Ee8a52DA101B77742E51FB573f523a6Ac77';
+        this.contractAddress = '0xd0B578573eCc51810c07fc044b03f13331af0e09';
         this.accounts = [];
         this.accountLocations = {};
         this.activeMovements = new Map();
@@ -634,6 +634,10 @@ class KazakhKhanateGame {
             // Add to active movements
             this.activeMovements.set(movementId, battleData);
             
+            // Schedule battle execution with a small delay after travel time
+            setTimeout(() => this.executeBattle(battleId), travelTime + 2000);
+                        
+                
             // Show travel notification with View on Map button
             this.showNotification(`
                 ⚔️ Troops are marching to battle! ETA: ${Math.ceil(travelTime / 1000)} seconds
