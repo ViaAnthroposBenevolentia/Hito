@@ -16,9 +16,6 @@ module.exports = {
       gasPrice: 10000000000 // 10 Gwei
     }
   },
-  etherscan: {
-    apiKey: process.env.BSCSCAN_API_KEY
-  },
   paths: {
     artifacts: './src/artifacts',
   }

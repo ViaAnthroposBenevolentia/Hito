@@ -56,6 +56,9 @@ contract KazakhKhanate is ReentrancyGuard {
     event AchievementUnlocked(address indexed player, string achievement);
     event BattleSpedUp(uint256 battleId, address attacker);
 
+    address[] public allKhanates;
+    mapping(address => uint256) public khanateIndex;
+
     constructor() {
         // Initialize Batyr stats
         batyrs[1] = BatyrStats({
@@ -131,6 +134,10 @@ contract KazakhKhanate is ReentrancyGuard {
             successfulDefenses: 0,
             initialized: true
         });
+
+        // Add to allKhanates array and store index
+        khanateIndex[msg.sender] = allKhanates.length;
+        allKhanates.push(msg.sender);
 
         emit KhanateCreated(msg.sender, name);
     }
@@ -386,5 +393,9 @@ contract KazakhKhanate is ReentrancyGuard {
             achievements[player]["DEFENDER"],
             achievements[player]["COLLECTOR"]
         );
+    }
+
+    function getAllKhanates() external view returns (address[] memory) {
+        return allKhanates;
     }
 } 

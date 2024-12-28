@@ -3,7 +3,7 @@ class KazakhKhanateGame {
         this.web3 = null;
         this.contract = null;
         this.account = null;
-        this.contractAddress = '0xd0B578573eCc51810c07fc044b03f13331af0e09';
+        this.contractAddress = '0x9E455D779e85d7dC81d3576E78ad7A6D6bfb47fa';
         this.accounts = [];
         this.accountLocations = {};
         this.activeMovements = new Map();
@@ -107,10 +107,17 @@ class KazakhKhanateGame {
 
     async initialize() {
         try {
-            // Connect directly to Ganache
-            this.web3 = new Web3('http://127.0.0.1:7545');
-            this.accounts = await this.web3.eth.getAccounts();
-            console.log('📝 Available accounts:', this.accounts);
+            // Check if MetaMask is installed
+            if (typeof window.ethereum === 'undefined') {
+                throw new Error('MetaMask is not installed. Please install MetaMask to use this application.');
+            }
+
+            // Request account access
+            this.accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            console.log('📝 Connected accounts:', this.accounts);
+
+            // Create Web3 instance using MetaMask provider
+            this.web3 = new Web3(window.ethereum);
             
             if (this.accounts.length > 0) {
                 await this.loadContract();
@@ -122,18 +129,31 @@ class KazakhKhanateGame {
                 }
                 console.log('✅ Contract verified at address:', this.contractAddress);
 
+                // Load all Khanates after contract verification
+                await this.loadAllKhanates();
+                
                 // Show account selection if no account is selected
                 if (!this.account) {
                     this.showAccountSelection();
                 } else {
                     await this.initializeWithAccount(this.account);
                 }
+
+                // Setup MetaMask event listeners
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    this.handleAccountChange(accounts);
+                });
+
+                window.ethereum.on('chainChanged', (chainId) => {
+                    window.location.reload();
+                });
+
             } else {
-                this.showNotification('❌ No accounts found in Ganache');
+                this.showNotification('❌ Please connect your MetaMask wallet');
             }
         } catch (error) {
             console.error('🐞 Initialization error:', error);
-            this.showNotification('❌ Failed to connect to Ganache. Make sure it is running on port 7545');
+            this.showNotification('❌ ' + error.message);
         }
     }
 
@@ -158,57 +178,33 @@ class KazakhKhanateGame {
         const accountSelection = document.getElementById('account-selection');
         accountSelection.classList.remove('hidden');
 
-        // Clear existing markers
-        document.getElementById('account-markers').innerHTML = '';
+        // Load all Khanates
+        await this.loadAllKhanates();
+    }
 
-        // Initialize map markers for each account
-        for (const account of this.accounts) {
-            try {
-                // Try to get Khanate info
-                let khanateName = '';
-                try {
-                    const khanateInfo = await this.contract.methods.getKhanateStats(account).call();
-                    khanateName = khanateInfo.name || `Account ${account.substring(0, 6)}`;
-                } catch (error) {
-                    khanateName = `Account ${account.substring(0, 6)}`;
-                }
+    createMapMarker(account, position, khanateName) {
+        const markerContainer = document.createElement('div');
+        markerContainer.className = 'map-marker-container';
+        markerContainer.style.left = `${position.x}%`;
+        markerContainer.style.top = `${position.y}%`;
 
-                // Generate a position on the map
-                const position = this.getAccountPosition(account, this.accounts.indexOf(account));
-                this.accountLocations[account] = position;
-
-                // Create marker container
-                const markerContainer = document.createElement('div');
-                markerContainer.className = 'map-marker-container';
-                markerContainer.style.left = `${position.x}%`;
-                markerContainer.style.top = `${position.y}%`;
-
-                // Create marker
-                const marker = document.createElement('div');
-                marker.className = 'map-marker';
-                if (account === this.account) {
-                    marker.classList.add('current');
-                }
-
-                // Create name label
-                const nameLabel = document.createElement('div');
-                nameLabel.className = 'khanate-name-label';
-                nameLabel.textContent = khanateName;
-
-                // Add tooltip and click event
-                markerContainer.addEventListener('mouseover', (e) => this.showTooltip(e, account));
-                markerContainer.addEventListener('mouseout', () => this.hideTooltip());
-                markerContainer.addEventListener('click', () => this.selectAccount(account));
-
-                // Assemble marker
-                markerContainer.appendChild(marker);
-                markerContainer.appendChild(nameLabel);
-                document.getElementById('account-markers').appendChild(markerContainer);
-
-            } catch (error) {
-                console.error(`Error creating marker for account ${account}:`, error);
-            }
+        const marker = document.createElement('div');
+        marker.className = 'map-marker';
+        if (account === this.account) {
+            marker.classList.add('current');
         }
+
+        const nameLabel = document.createElement('div');
+        nameLabel.className = 'khanate-name-label';
+        nameLabel.textContent = khanateName;
+
+        markerContainer.addEventListener('mouseover', (e) => this.showTooltip(e, account));
+        markerContainer.addEventListener('mouseout', () => this.hideTooltip());
+        markerContainer.addEventListener('click', () => this.selectAccount(account));
+
+        markerContainer.appendChild(marker);
+        markerContainer.appendChild(nameLabel);
+        document.getElementById('account-markers').appendChild(markerContainer);
     }
 
     getAccountPosition(account, index) {
@@ -430,6 +426,10 @@ class KazakhKhanateGame {
             
             console.log('✅ Khanate creation transaction:', result);
             this.showNotification('✅ Khanate created successfully!');
+            
+            // Reload all Khanates after creation
+            await this.loadAllKhanates();
+            
             await this.checkKhanateStatus();
         } catch (error) {
             console.error('🐞 Khanate creation error:', error);
@@ -1660,6 +1660,54 @@ class KazakhKhanateGame {
             }
         } catch (error) {
             console.error('Battle progress check error:', error);
+        }
+    }
+
+    // Add new method to handle account changes
+    async handleAccountChange(accounts) {
+        if (accounts.length === 0) {
+            // MetaMask is locked or user has not connected any accounts
+            this.showNotification('❌ Please connect your MetaMask wallet');
+            this.logout();
+        } else if (accounts[0] !== this.account) {
+            // Account changed, reload with new account
+            this.account = accounts[0];
+            await this.initializeWithAccount(this.account);
+            this.showNotification('✅ Account changed successfully');
+        }
+    }
+
+    async loadAllKhanates() {
+        try {
+            // Get all Khanate addresses from contract
+            const addresses = await this.contract.methods.getAllKhanates().call();
+            
+            // Clear existing markers
+            document.getElementById('account-markers').innerHTML = '';
+            
+            // Track loaded Khanates
+            this.accounts = addresses;
+            
+            // Load each Khanate
+            for (let i = 0; i < addresses.length; i++) {
+                const address = addresses[i];
+                try {
+                    const khanateInfo = await this.contract.methods.getKhanateStats(address).call();
+                    
+                    // Generate position if not exists
+                    if (!this.accountLocations[address]) {
+                        this.accountLocations[address] = this.getAccountPosition(address, i);
+                    }
+                    
+                    // Create marker
+                    this.createMapMarker(address, this.accountLocations[address], khanateInfo.name);
+                    
+                } catch (error) {
+                    console.error(`Error loading Khanate ${address}:`, error);
+                }
+            }
+        } catch (error) {
+            console.error('Error loading Khanates:', error);
         }
     }
 }
